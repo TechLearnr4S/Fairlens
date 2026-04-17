@@ -1,0 +1,39 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+
+@theme {
+  --color-primary-50: #f0f9ff;
+  --color-primary-100: #e0f2fe;
+  --color-primary-400: #38bdf8;
+  --color-primary-500: #0ea5e9;
+  --color-primary-900: #0c4a6e;
+  
+  --color-dark-600: #475569;
+  --color-dark-700: #334155;
+  --color-dark-800: #1e293b;
+  --color-dark-900: #0f172a;
+}
+
+@layer base {
+  body {
+    @apply bg-dark-900 text-slate-200 font-sans antialiased;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-dark-800/80 backdrop-blur-lg border border-slate-700/50 rounded-xl shadow-xl;
+  }
+  
+  .btn-primary {
+    @apply px-4 py-2 bg-gradient-to-r from-primary-500 to-indigo-500 hover:from-primary-400 hover:to-indigo-400 text-white rounded-lg font-medium transition-all duration-200 shadow-lg shadow-primary-500/25 active:scale-95;
+  }
+  
+  .btn-secondary {
+    @apply px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg font-medium transition-all duration-200 border border-slate-600 active:scale-95;
+  }
+}

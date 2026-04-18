@@ -9,8 +9,10 @@ from fairness_engine import compute_disparities
 from proxy_detector import identify_proxies
 from llm_explainer import generate_fairness_explanation
 from governance import generate_audit_receipt, generate_fairness_passport
+from bias_simulator import simulate_threshold_adjustment
 
 # In-memory storage for MVP (In production, load from Cloud Storage/Firestore)
+# Format: { job_id: {"df": DataFrame, "results": dict, "config": dict} }
 LOCAL_DATASTORE = {}
 
 app = FastAPI(title="FairLens Studio API")
@@ -29,9 +31,6 @@ def read_root():
 
 @app.post("/audits/upload")
 async def upload_dataset(file: UploadFile = File(...)):
-    """
-    Receives a CSV file and returns the columns to the frontend.
-    """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
     
@@ -41,7 +40,12 @@ async def upload_dataset(file: UploadFile = File(...)):
         columns = df.columns.tolist()
         
         job_id = str(uuid.uuid4())
-        LOCAL_DATASTORE[job_id] = df
+        LOCAL_DATASTORE[job_id] = {
+            "df": df,
+            "filename": file.filename,
+            "results": {},
+            "config": {}
+        }
         
         return {
             "job_id": job_id,
@@ -53,60 +57,86 @@ async def upload_dataset(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Error parsing CSV: {str(e)}")
 
 class AuditRunRequest(BaseModel):
-    job_id: str
     target_column: str
     protected_attributes: list[str]
 
-@app.post("/audits/run")
-async def run_audit(payload: AuditRunRequest):
-    if payload.job_id not in LOCAL_DATASTORE:
-        raise HTTPException(status_code=404, detail="Dataset not found or session expired. Please re-upload.")
+@app.post("/audits/{job_id}/run")
+async def run_audit(job_id: str, payload: AuditRunRequest):
+    if job_id not in LOCAL_DATASTORE:
+        raise HTTPException(status_code=404, detail="Dataset not found")
         
-    df = LOCAL_DATASTORE[payload.job_id]
+    df = LOCAL_DATASTORE[job_id]["df"]
     
-    # Run core fairness analysis
     try:
         disparities = compute_disparities(df, payload.target_column, payload.protected_attributes)
         proxies = identify_proxies(df, payload.protected_attributes, top_n=3)
-        explanation = generate_fairness_explanation(disparities, proxies)
+        
+        # Save results for subsequent calls
+        LOCAL_DATASTORE[job_id]["results"] = {
+            "disparities": disparities,
+            "proxies": proxies
+        }
+        LOCAL_DATASTORE[job_id]["config"] = {
+            "target": payload.target_column,
+            "protected": payload.protected_attributes
+        }
         
         return {
             "status": "success",
-            "job_id": payload.job_id,
+            "job_id": job_id,
             "disparities": disparities,
-            "proxies": proxies,
-            "explanation": explanation
+            "proxies": proxies
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
-class PassportRequest(BaseModel):
-    job_id: str
-    filename: str
-    target_column: str
-    protected_attributes: list[str]
-    disparities: dict
-    proxies: list
-    explanation: str | None = None
+@app.post("/audits/{job_id}/explain")
+async def explain_audit(job_id: str):
+    if job_id not in LOCAL_DATASTORE or not LOCAL_DATASTORE[job_id]["results"]:
+        raise HTTPException(status_code=404, detail="Audit results not found")
+        
+    res = LOCAL_DATASTORE[job_id]["results"]
+    explanation = generate_fairness_explanation(res["disparities"], res["proxies"])
+    LOCAL_DATASTORE[job_id]["results"]["explanation"] = explanation
+    
+    return explanation
 
-@app.post("/audits/passport")
-async def generate_passport(payload: PassportRequest):
-    try:
-        receipt = generate_audit_receipt(
-            payload.job_id, payload.filename, payload.target_column, 
-            payload.protected_attributes, payload.disparities, payload.proxies
-        )
+@app.post("/audits/{job_id}/simulate")
+async def simulate_mitigation(job_id: str):
+    if job_id not in LOCAL_DATASTORE or "target" not in LOCAL_DATASTORE[job_id]["config"]:
+        raise HTTPException(status_code=404, detail="Audit config not found")
         
-        markdown = generate_fairness_passport(
-            payload.job_id, payload.filename, payload.target_column, 
-            payload.protected_attributes, payload.disparities, payload.proxies, 
-            payload.explanation, receipt["signature_hash"]
-        )
+    data = LOCAL_DATASTORE[job_id]
+    simulation = simulate_threshold_adjustment(
+        data["df"], 
+        data["config"]["target"], 
+        data["config"]["protected"]
+    )
+    LOCAL_DATASTORE[job_id]["results"]["simulation"] = simulation
+    
+    return simulation
+
+@app.get("/audits/{job_id}/passport")
+async def get_passport(job_id: str):
+    if job_id not in LOCAL_DATASTORE or not LOCAL_DATASTORE[job_id]["results"]:
+        raise HTTPException(status_code=404, detail="Audit results not found")
         
-        return {
-            "receipt": receipt,
-            "markdown": markdown
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
+    data = LOCAL_DATASTORE[job_id]
+    receipt = generate_audit_receipt(
+        job_id, data["filename"], data["config"]["target"], 
+        data["config"]["protected"], data["results"]["disparities"], data["results"]["proxies"]
+    )
+    
+    markdown = generate_fairness_passport(
+        job_id, data["filename"], data["config"]["target"], 
+        data["config"]["protected"], data["results"]["disparities"], 
+        data["results"]["proxies"], data["results"].get("explanation"), 
+        receipt["signature_hash"], data["results"].get("simulation")
+    )
+    
+    return {
+        "receipt": receipt,
+        "markdown": markdown,
+        "job_id": job_id
+    }
 

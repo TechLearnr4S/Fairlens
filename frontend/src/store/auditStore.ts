@@ -11,7 +11,11 @@ interface AuditState {
   isUploading: boolean;
   disparities: any;
   proxies: any[];
-  explanation: string | null;
+  explanation: any | null;
+  aiInsight: any | null;
+  simulation: any | null;
+  isExplaining: boolean;
+  isSimulating: boolean;
   
   setFile: (file: File | null) => void;
   setJobId: (id: string | null) => void;
@@ -23,7 +27,11 @@ interface AuditState {
   setIsUploading: (status: boolean) => void;
   setDisparities: (data: any) => void;
   setProxies: (data: any[]) => void;
-  setExplanation: (text: string | null) => void;
+  setExplanation: (data: any | null) => void;
+  setAiInsight: (data: any | null) => void;
+  setSimulation: (data: any | null) => void;
+  setIsExplaining: (status: boolean) => void;
+  setIsSimulating: (status: boolean) => void;
   reset: () => void;
 }
 
@@ -39,6 +47,10 @@ export const useAuditStore = create<AuditState>((set) => ({
   disparities: null,
   proxies: [],
   explanation: null,
+  aiInsight: null,
+  simulation: null,
+  isExplaining: false,
+  isSimulating: false,
   
   setFile: (file) => set({ currentFile: file }),
   setJobId: (id) => set({ jobId: id }),
@@ -54,7 +66,11 @@ export const useAuditStore = create<AuditState>((set) => ({
   setIsUploading: (status) => set({ isUploading: status }),
   setDisparities: (data) => set({ disparities: data }),
   setProxies: (data) => set({ proxies: data }),
-  setExplanation: (text) => set({ explanation: text }),
+  setExplanation: (data) => set({ explanation: data }),
+  setAiInsight: (data) => set({ aiInsight: data }),
+  setSimulation: (data) => set({ simulation: data }),
+  setIsExplaining: (status) => set({ isExplaining: status }),
+  setIsSimulating: (status) => set({ isSimulating: status }),
   reset: () => set({
     currentFile: null,
     jobId: null,
@@ -67,5 +83,9 @@ export const useAuditStore = create<AuditState>((set) => ({
     disparities: null,
     proxies: [],
     explanation: null,
+    aiInsight: null,
+    simulation: null,
+    isExplaining: false,
+    isSimulating: false,
   }),
 }));

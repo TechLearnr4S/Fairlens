@@ -1,6 +1,4 @@
 import pandas as pd
-from fairlearn.metrics import MetricFrame, selection_rate, demographic_parity_difference
-from sklearn.metrics import accuracy_score
 
 def compute_disparities(df: pd.DataFrame, target_col: str, protected_attrs: list) -> dict:
     results = {}

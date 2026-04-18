@@ -110,6 +110,21 @@ async def upload_dataset(file: UploadFile = File(...)):
     logger.info("UPLOAD | job_id=%s filename=%s rows=%d cols=%d",
                 job_id, file.filename, len(df), len(df.columns))
 
+    column_types = {}
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            column_types[col] = "numeric"
+        else:
+            column_types[col] = "categorical"
+
+    return {
+        "job_id": job_id,
+        "columns": columns,
+        "column_types": column_types,
+        "preview": df.head(10).fillna("-").to_dict(orient="records"),
+        "file_url": "local_storage"
+    }
+
 class AuditRunRequest(BaseModel):
     target_column: str
     protected_attributes: list[str]
@@ -844,7 +859,18 @@ async def run_fairness_copilot_api(audit_id: str):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a minute.")
 
     try:
-        report = await run_fairness_copilot(audit_id)
+        if audit_id not in LOCAL_DATASTORE:
+            raise HTTPException(
+                status_code=404, 
+                detail="Backend server hot-reloaded and cleared local memory. Please click 'New Audit' and re-upload your CSV to continue."
+            )
+            
+        raw_results = LOCAL_DATASTORE[audit_id].get("results", {})
+        report = await run_fairness_copilot(
+            audit_id, 
+            local_disparities=raw_results.get("disparities"), 
+            local_proxies=raw_results.get("proxies")
+        )
         if "error" in report:
             raise HTTPException(status_code=400, detail=report["error"])
         return report

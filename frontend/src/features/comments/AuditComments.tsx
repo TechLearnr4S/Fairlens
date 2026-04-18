@@ -33,10 +33,15 @@ export default function AuditComments({ jobId }: { jobId: string }) {
   const fetchThreads = async () => {
     try {
       const res = await fetch(`http://localhost:8000/audits/${jobId}/threads`);
+      if (!res.ok) {
+        setThreads([]);
+        return;
+      }
       const data = await res.json();
-      setThreads(data);
+      setThreads(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('Failed to fetch threads', e);
+      setThreads([]);
     }
   };
 

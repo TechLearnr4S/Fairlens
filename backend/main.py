@@ -431,6 +431,7 @@ async def proxy_detection(audit_id: str):
         "status": "success",
         "audit_id": audit_id,
         "proxy_risks": proxy_risks,
+        "correlation_matrix": correlations,
         "summary": {
             "total_features_analyzed": len(proxy_risks),
             "high_risk_count": high,

@@ -24,6 +24,7 @@ interface AuditState {
   
   copilotSummary: any | null;
   isCopilotRunning: boolean;
+  correlationMatrix: any | null;
   
   setFile: (file: File | null) => void;
   setJobId: (id: string | null) => void;
@@ -47,6 +48,7 @@ interface AuditState {
   setIsExplainingProxy: (status: boolean) => void;
   setCopilotSummary: (data: any | null) => void;
   setIsCopilotRunning: (status: boolean) => void;
+  setCorrelationMatrix: (data: any | null) => void;
   reset: () => void;
 }
 
@@ -73,6 +75,7 @@ export const useAuditStore = create<AuditState>((set) => ({
   isExplainingProxy: false,
   copilotSummary: null,
   isCopilotRunning: false,
+  correlationMatrix: null,
   
   setFile: (file) => set({ currentFile: file }),
   setJobId: (id) => set({ jobId: id }),
@@ -100,6 +103,7 @@ export const useAuditStore = create<AuditState>((set) => ({
   setIsExplainingProxy: (status) => set({ isExplainingProxy: status }),
   setCopilotSummary: (data) => set({ copilotSummary: data }),
   setIsCopilotRunning: (status) => set({ isCopilotRunning: status }),
+  setCorrelationMatrix: (data) => set({ correlationMatrix: data }),
   reset: () => set({
     currentFile: null,
     jobId: null,
@@ -123,5 +127,6 @@ export const useAuditStore = create<AuditState>((set) => ({
     isSimulating: false,
     copilotSummary: null,
     isCopilotRunning: false,
+    correlationMatrix: null,
   }),
 }));

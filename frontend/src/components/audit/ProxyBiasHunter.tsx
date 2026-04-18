@@ -7,7 +7,6 @@ import {
   Table, 
   ShieldAlert, 
   Loader2, 
-  CheckCircle2,
   TrendingDown,
   Activity
 } from 'lucide-react';
@@ -16,13 +15,15 @@ import {
   Bar, 
   XAxis, 
   YAxis, 
-  CartesianGrid, 
   Tooltip, 
   ResponsiveContainer, 
   Cell 
 } from 'recharts';
 import { useAuditStore } from '../../store/auditStore';
 import ProxyAiInsight from './ProxyAiInsight';
+import CorrelationHeatmap from './CorrelationHeatmap';
+import ProxyRiskBarChart from './ProxyRiskBarChart';
+import ProxyNetworkGraph from './ProxyNetworkGraph';
 
 export default function ProxyBiasHunter() {
   const { 
@@ -34,7 +35,9 @@ export default function ProxyBiasHunter() {
     isProxyAnalyzing,
     setProxyRisks,
     setProxySummary,
-    setIsProxyAnalyzing
+    setCorrelationMatrix,
+    setIsProxyAnalyzing,
+    correlationMatrix
   } = useAuditStore();
 
   const runDetection = async () => {
@@ -53,9 +56,8 @@ export default function ProxyBiasHunter() {
       const data = await res.json();
       if (data.status === 'success') {
         setProxyRisks(data.proxy_risks);
+        setCorrelationMatrix(data.correlation_matrix);
         
-        // Calculate a simple summary if backend doesn't provide one in this endpoint
-        // (The provided backend /proxy-risks returns the list, /proxy-detection returns summary)
         const summary = {
           high_risk_count: data.proxy_risks.filter((r: any) => r.risk_level === 'High').length,
           top_proxy: data.proxy_risks[0]?.feature || 'None'
@@ -86,6 +88,7 @@ export default function ProxyBiasHunter() {
 
   return (
     <div className="space-y-6">
+      {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -119,6 +122,7 @@ export default function ProxyBiasHunter() {
         </button>
       </div>
 
+      {/* Main Analysis Area */}
       {isProxyAnalyzing ? (
         <div className="glass-panel p-12 flex flex-col items-center justify-center text-center space-y-4 animate-pulse">
           <div className="w-16 h-16 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-400">
@@ -148,7 +152,7 @@ export default function ProxyBiasHunter() {
                 <div className="p-3 bg-dark-900/50 rounded-lg border border-slate-700/50">
                   <p className="text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-wider">Top Proxy Offender</p>
                   <div className="flex items-center justify-between">
-                    <span className="text-lg font-bold text-rose-300">{proxySummary?.top_proxy}</span>
+                    <span className="text-lg font-bold text-rose-300">{proxySummary?.top_proxy || 'N/A'}</span>
                     <TrendingDown size={18} className="text-rose-500 opacity-50" />
                   </div>
                 </div>
@@ -182,8 +186,13 @@ export default function ProxyBiasHunter() {
             </div>
           </div>
 
+          {/* Ranking Bar Chart */}
+          <div className="lg:col-span-2">
+            <ProxyRiskBarChart data={proxyRisks} />
+          </div>
+
           {/* Detailed Table */}
-          <div className="lg:col-span-2 glass-panel overflow-hidden border-slate-700/50 flex flex-col">
+          <div className="lg:col-span-3 glass-panel overflow-hidden border-slate-700/50 flex flex-col max-h-[600px]">
             <div className="p-4 border-b border-slate-700/50 bg-slate-800/30 flex items-center justify-between">
               <h3 className="font-semibold flex items-center gap-2 text-slate-200">
                 <Table size={18} className="text-primary-400" />
@@ -263,7 +272,19 @@ export default function ProxyBiasHunter() {
         </div>
       )}
 
-      {/* AI Explanation Layer */}
+      {/* Advanced Visualizations */}
+      {correlationMatrix && (
+        <div className="space-y-6">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+            <CorrelationHeatmap matrix={correlationMatrix} />
+          </div>
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-300">
+            <ProxyNetworkGraph matrix={correlationMatrix} />
+          </div>
+        </div>
+      )}
+
+      {/* AI Explanation layer */}
       {proxyRisks.length > 0 && (
         <div className="mt-8">
           <ProxyAiInsight />

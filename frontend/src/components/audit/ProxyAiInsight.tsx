@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, AlertTriangle, ShieldCheck, Zap, Info, Loader2, ListTodo } from 'lucide-react';
+import { Sparkles, AlertTriangle, ShieldCheck, Zap, Info, ListTodo } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 
 export default function ProxyAiInsight() {
@@ -120,49 +120,46 @@ export default function ProxyAiInsight() {
           <>
             <div className="bg-rose-500/5 border border-rose-500/10 p-4 rounded-xl">
               <p className="text-lg text-slate-200 leading-relaxed italic">
-                "{proxyAiInsight.summary}"
+                "{proxyAiInsight.summary || 'Proxy risk narrative generated.'}"
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Risky Features */}
               <div className="space-y-4">
                 <h4 className="flex items-center gap-2 text-sm font-bold text-slate-400 uppercase tracking-wider">
                   <AlertTriangle size={16} className="text-rose-400" />
                   Surrogate Features
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {proxyAiInsight.risky_features.map((feature: string, i: number) => (
+                  {(proxyAiInsight.risky_features || []).map((feature: string, i: number) => (
                     <span key={i} className="px-3 py-1 bg-dark-900 border border-rose-500/30 text-rose-300 rounded-full text-xs font-bold shadow-inner">
                       {feature}
                     </span>
                   ))}
                 </div>
                 <div className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap mt-2">
-                  {highlightContent(proxyAiInsight.narrative)}
+                  {highlightContent(proxyAiInsight.narrative || '')}
                 </div>
               </div>
 
               <div className="space-y-6">
-                {/* Real World Impact */}
                 <div className="space-y-3">
                   <h4 className="flex items-center gap-2 text-sm font-bold text-slate-400 uppercase tracking-wider">
                     <ShieldCheck size={16} className="text-primary-400" />
                     Compliance Implication
                   </h4>
                   <p className="text-slate-300 text-sm leading-relaxed p-4 bg-primary-500/5 rounded-xl border border-primary-500/20">
-                    {highlightContent(proxyAiInsight.implications)}
+                    {highlightContent(proxyAiInsight.implications || '')}
                   </p>
                 </div>
 
-                {/* Recommendations */}
                 <div className="space-y-3">
                   <h4 className="flex items-center gap-2 text-sm font-bold text-slate-400 uppercase tracking-wider">
                     <ListTodo size={16} className="text-emerald-400" />
                     Mitigation Strategy
                   </h4>
                   <ul className="space-y-3">
-                    {proxyAiInsight.actions.map((action: string, i: number) => (
+                    {(proxyAiInsight.actions || []).map((action: string, i: number) => (
                       <li key={i} className="flex items-start gap-3 p-3 bg-emerald-500/5 rounded-lg border border-emerald-500/20 text-slate-300 text-xs">
                         <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 shadow-lg shadow-emerald-500/50" />
                         {highlightContent(action)}
@@ -175,9 +172,6 @@ export default function ProxyAiInsight() {
           </>
         )}
       </div>
-    </div>
-  );
-}
     </div>
   );
 }

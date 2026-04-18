@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle, Download, Loader } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
-import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import AuditComments from '../../features/comments/AuditComments';
 import FairnessCopilot from '../../components/audit/FairnessCopilot';
+import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
 
 export default function Dashboard() {
   const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
@@ -86,7 +87,7 @@ export default function Dashboard() {
                 <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
                   <PolarGrid stroke="#334155" />
                   <PolarAngleAxis dataKey="attribute" tick={{ fill: '#94a3b8' }} />
-                  <PolarRadiusAxis angle={30} domain={[0, 0.5]} tick={{ fill: '#64748b' }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 0.5]} tickFormatter={(val: any) => parseFloat(val).toFixed(2)} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }} />
                   <Radar name="Disparity Score" dataKey="disparity" stroke="#0ea5e9" fill="#0ea5e9" fillOpacity={0.6} />
                 </RadarChart>
               </ResponsiveContainer>

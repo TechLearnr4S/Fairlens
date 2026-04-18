@@ -1,100 +1,104 @@
 import google.generativeai as genai
 import json
 import logging
+import asyncio
 from config import GEMINI_API_KEY
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# Initialize Gemini
+# -------------------------------
+# Gemini Initialization (ONE TIME)
+# -------------------------------
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
 else:
-    logger.warning("GEMINI_API_KEY not found in config. AI services will be unavailable.")
+    model = None
+    logger.warning("GEMINI_API_KEY not found. AI disabled.")
 
-    Returns:
-    - Human-readable explanation text
+
+# -------------------------------
+# Proxy Explanation (FIXED)
+# -------------------------------
+def generate_proxy_explanation(proxy_results: list[dict]) -> str:
     """
-    if not GEMINI_API_KEY:
-        return "AI Explanation unavailable: API Key missing. Check your backend .env file."
+    Generate human-readable explanation for proxy bias.
+    """
+    if not model:
+        return "AI Explanation unavailable: API key missing."
 
-    # ── 1. Input Hardening: Truncate results to avoid token overflow ─────
-    # We focus on the top 15 highest-risk features
-    truncated_results = sorted(
-        proxy_results, 
-        key=lambda x: x.get('score', 0), 
-        reverse=True
-    )[:15]
+    # Limit input size
+    truncated = sorted(proxy_results, key=lambda x: x.get("score", 0), reverse=True)[:15]
+
+    prompt = f"""
+You are an AI fairness expert focusing on Proxy Bias.
+
+Proxy Bias Results:
+{json.dumps(truncated, indent=2)}
+
+Task:
+Explain which features are acting as proxies and why they are risky.
+Mention real-world implications and recommended mitigation steps.
+
+Keep the explanation concise, clear, and professional. Avoid technical jargon.
+"""
 
     try:
-        # Initialize the model
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # ── 2. Request Hardening: Set timeouts ──────────────────────────────
-        # 30 second timeout for the generation request
-        request_options = {"timeout": 30.0}
-        
-        # Construct the specific prompt as requested
-        prompt = f"""
-Given the following proxy bias analysis results:
-{json.dumps(truncated_results, indent=2)}
+        response = model.generate_content(prompt, request_options={"timeout": 30})
 
-Explain:
-- which features are acting as proxies
-- why they are risky
-- real-world implications
-- recommended mitigation steps
-
-Keep the explanation concise, clear, and focused on helping a non-technical stakeholder understand the risks.
-"""
-        
-        # Generate content with timeout
-        response = model.generate_content(
-            prompt,
-            request_options=request_options
-        )
-        
         if response and response.text:
             return response.text.strip()
-        else:
-            return "Gemini failed to generate a response. Please check your data and try again."
+
+        return "Gemini failed to generate a response. Please check your data."
 
     except Exception as e:
-        # Sanitize logs: don't log the prompt or payload which might be huge
-        error_type = type(e).__name__
-        logger.error(f"Gemini API Error [{error_type}]: {str(e)}")
-        return get_fallback_explanation()
+        logger.error(f"Gemini Error in generate_proxy_explanation: {str(e)}")
+        return "The analysis detected potential proxy variables that may indirectly encode protected attributes. We recommend reviewing features with high correlation scores."
 
 
+# -------------------------------
+# Generic Completion (SYNC)
+# -------------------------------
 def generate_completion(prompt: str, persona: str = "Expert AI Auditor") -> str:
     """
     Generic Gemini completion helper for multi-agent tasks.
     """
-    if not GEMINI_API_KEY:
-        return f"Service unavailable. [{persona}]"
+    if not model:
+        return f"Service unavailable [{persona}]"
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        full_prompt = f"Role: {persona}\n\nTask: {prompt}"
+        full_prompt = f"Role: {persona}\n\nTask:\n{prompt}"
         
         response = model.generate_content(
             full_prompt,
-            request_options={"timeout": 30.0}
+            request_options={"timeout": 30}
         )
         
         if response and response.text:
             return response.text.strip()
+            
         return "No response generated."
+
     except Exception as e:
         logger.error(f"Gemini Completion Error: {str(e)}")
-        return "Internal agent error."
+        return "Internal agent error during narrative generation."
 
 
-async def generate_ai_insight(findings: list[dict], proxies: list[dict], mitigation: dict) -> dict[str, str]:
+# -------------------------------
+# AI INSIGHT (OPTIMIZED)
+# -------------------------------
+async def generate_ai_insight(
+    findings: list[dict],
+    proxies: list[dict],
+    mitigation: dict
+) -> dict:
     """
     Produces a consolidated AI fairness narrative and governance summary.
     Optimized to use a single LLM call for multiple cognitive tasks.
     """
+    if not model:
+        return fallback_ai_insight()
+
     prompt = f"""
 You are an AI fairness expert for FairLens Studio.
 
@@ -105,51 +109,45 @@ Input Data:
 
 Tasks:
 1. Explain the fairness issues in simple, jargon-free language.
-2. Identify root causes for the detected bias.
-3. Describe the real-world impact if this model were deployed.
-4. Provide a final governance recommendation.
-
-Constraints:
-- Max 150 words total.
-- Be clear, authoritative, and professional.
-- Avoid technical jargon (e.g., don't say 'Pearson correlation').
+2. Provide a final governance recommendation based on the findings.
 
 Format:
-Return a JSON object with:
-{{
-  "explanation": "concise plain language explanation",
-  "governance_summary": "deployment recommendation and summary"
-}}
+Return a STRICT JSON object with these keys:
+- "explanation": string
+- "governance_summary": string
 """
+
     try:
-        # Use a more restrictive persona for governance
-        response_text = await generate_completion(prompt, persona="Fairness Copilot")
+        # Run blocking call in thread (FIX for async)
+        response_text = await asyncio.to_thread(
+            generate_completion,
+            prompt,
+            "Fairness Copilot"
+        )
         
-        # Clean response if LLM adds markdown backticks
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-
-        data = json.loads(response_text)
+        cleaned = clean_json_response(response_text)
+        data = json.loads(cleaned)
+        
         return {
-            "explanation": data.get("explanation", "Bias detected across subgroups."),
-            "governance_summary": data.get("governance_summary", "Further review suggested.")
+            "explanation": data.get("explanation", "Disparity detected in subgroup selection."),
+            "governance_summary": data.get("governance_summary", "Status: Pending Mitigation.")
         }
+        
     except Exception as e:
-        logger.error(f"Generate AI insight failed: {e}")
-        return {
-            "explanation": "The analysis detected disparities in selection rates across protected subgroups. This suggests potential modeling bias or representation gaps in the training data.",
-            "governance_summary": "Status: Pending Mitigation. The model requires threshold adjustments or reweighting before safe deployment."
-        }
+        logger.error(f"Generate AI insight failed: {str(e)}")
+        return fallback_ai_insight()
 
 
-def get_fallback_explanation() -> str:
-    """
-    Provides a generic fallback explanation if the API fails entirely.
-    """
-    return (
-        "Potential proxy variables detected. High correlation between non-sensitive features "
-        "and protected attributes suggests potential 'redundant encoding'. "
-        "Recommendation: Review features with high proxy scores and consider de-biasing techniques."
-    )
+def clean_json_response(text: str) -> str:
+    if "```json" in text:
+        return text.split("```json")[1].split("```")[0].strip()
+    if "```" in text:
+        return text.split("```")[1].split("```")[0].strip()
+    return text.strip()
+
+
+def fallback_ai_insight() -> dict:
+    return {
+        "explanation": "The analysis detected disparities in selection rates across protected subgroups. This suggests potential modeling bias or representation gaps.",
+        "governance_summary": "Status: Pending Mitigation. The model requires threshold adjustments or reweighting before safe deployment."
+    }

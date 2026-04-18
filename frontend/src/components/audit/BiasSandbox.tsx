@@ -75,6 +75,12 @@ export default function BiasSandbox() {
     { name: 'Disparity Score', before: simulation.before.disparity, after: simulation.after.disparity },
   ] : [];
 
+  const disparityReductionPct = Number(simulation?.delta?.disparity_reduction_pct) || 0;
+  const accuracyChangePct = Number(simulation?.delta?.accuracy_change_pct) || 0;
+  const confidenceScore = Math.round((Number(simulation?.confidence) || 0) * 100);
+  const afterDisparity = Number(simulation?.after?.disparity) || 0;
+  const afterAccuracy = Number(simulation?.after?.accuracy) || 0;
+
   return (
     <div className="glass-panel p-8 bg-slate-900/40 border-slate-700/50 rounded-3xl overflow-hidden relative">
       <div className="flex items-center justify-between mb-10">
@@ -200,7 +206,7 @@ export default function BiasSandbox() {
                 <div className="space-y-1">
                    <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">Mitigation Strategy Impact</h3>
                    <div className="flex items-center gap-3">
-                      <span className="text-2xl font-black text-white">{(Number(simulation?.delta?.disparity_reduction_pct) || 0).toFixed(1)}% Bias Reduction</span>
+                      <span className="text-2xl font-black text-white">{disparityReductionPct.toFixed(1)}% Bias Reduction</span>
                       <TrendingUp className="text-emerald-400" size={20} />
                    </div>
                 </div>
@@ -208,7 +214,7 @@ export default function BiasSandbox() {
                 <div className="flex items-center gap-4">
                     <div className="text-right">
                         <p className="text-[10px] font-black text-slate-500 uppercase">Confidence Score</p>
-                        <p className="text-lg font-mono font-black text-indigo-400">{Math.round((Number(simulation.confidence) || 0) * 100)}%</p>
+                        <p className="text-lg font-mono font-black text-indigo-400">{confidenceScore}%</p>
                     </div>
                     <div className="w-px h-10 bg-slate-800" />
                     <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center gap-2">
@@ -293,18 +299,18 @@ export default function BiasSandbox() {
                   <div className="bg-slate-900/40 border border-slate-800 p-4 rounded-xl">
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Disparity Gap</p>
                       <div className="flex items-center gap-3">
-                        <span className="text-xl font-black text-white">{(Number(simulation?.after?.disparity) * 100).toFixed(1)}%</span>
-                        <div className={`px-2 py-0.5 rounded-md text-[10px] font-black ${(Number(simulation?.delta?.disparity_reduction_pct) || 0) > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-                           {(Number(simulation?.delta?.disparity_reduction_pct) || 0) > 0 ? `↓ ${(Number(simulation?.delta?.disparity_reduction_pct) || 0)}% Reduction` : 'No change'}
+                        <span className="text-xl font-black text-white">{(afterDisparity * 100).toFixed(1)}%</span>
+                        <div className={`px-2 py-0.5 rounded-md text-[10px] font-black ${disparityReductionPct > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                           {disparityReductionPct > 0 ? `↓ ${disparityReductionPct}% Reduction` : 'No change'}
                         </div>
                       </div>
                   </div>
                   <div className="bg-slate-900/40 border border-slate-800 p-4 rounded-xl">
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Accuracy Trade-off</p>
                       <div className="flex items-center gap-3">
-                        <span className="text-xl font-black text-white">{(Number(simulation?.after?.accuracy) * 100).toFixed(1)}%</span>
-                        <div className={`px-2 py-0.5 rounded-md text-[10px] font-black ${(Number(simulation?.delta?.accuracy_change_pct) || 0) >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                           {(Number(simulation?.delta?.accuracy_change_pct) || 0) >= 0 ? `↑ ${(Number(simulation?.delta?.accuracy_change_pct) || 0)}%` : `↓ ${Math.abs(Number(simulation?.delta?.accuracy_change_pct) || 0)}%`}
+                        <span className="text-xl font-black text-white">{(afterAccuracy * 100).toFixed(1)}%</span>
+                        <div className={`px-2 py-0.5 rounded-md text-[10px] font-black ${accuracyChangePct >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                           {accuracyChangePct >= 0 ? `↑ ${accuracyChangePct}%` : `↓ ${Math.abs(accuracyChangePct)}%`}
                         </div>
                       </div>
                   </div>

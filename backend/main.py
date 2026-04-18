@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from fairness_engine import compute_disparities
 from proxy_detector import identify_proxies
 from llm_explainer import generate_fairness_explanation, generate_proxy_explanation
-from governance import generate_audit_receipt, generate_fairness_passport
+from governance import generate_audit_receipt, generate_fairness_passport, build_fairness_passport
 from bias_simulator import simulate_mitigation_enhanced
 from correlation_engine import run_correlation_analysis, compute_proxy_risk
 from firebase_client import (
@@ -162,26 +162,49 @@ async def simulate_mitigation(job_id: str, payload: SimulationRequest):
 @app.get("/audits/{job_id}/passport")
 async def get_passport(job_id: str):
     if job_id not in LOCAL_DATASTORE or not LOCAL_DATASTORE[job_id]["results"]:
-        raise HTTPException(status_code=404, detail="Audit results not found")
-        
+        raise HTTPException(status_code=404, detail="Audit results not found. Run the audit first.")
+
     data = LOCAL_DATASTORE[job_id]
-    receipt = generate_audit_receipt(
-        job_id, data["filename"], data["config"]["target"], 
-        data["config"]["protected"], data["results"]["disparities"], data["results"]["proxies"]
-    )
-    
-    markdown = generate_fairness_passport(
-        job_id, data["filename"], data["config"]["target"], 
-        data["config"]["protected"], data["results"]["disparities"], 
-        data["results"]["proxies"], data["results"].get("explanation"), 
-        receipt["signature_hash"], data["results"].get("simulation")
-    )
-    
-    return {
-        "receipt": receipt,
-        "markdown": markdown,
-        "job_id": job_id
-    }
+
+    # --- Build structured v2 passport ---
+    try:
+        passport = build_fairness_passport(job_id, data)
+    except Exception as e:
+        logger.error("Passport build failed for job_id=%s: %s", job_id, str(e))
+        # Graceful fallback passport so the API never returns 500 for a UI request
+        passport = {
+            "job_id": job_id,
+            "schema_version": "2.0",
+            "error": "Passport generation encountered an issue.",
+            "model_info": {"dataset": data.get("filename", "unknown"), "use_case": "N/A", "target": "N/A", "created_at": ""},
+            "fairness_summary": {"key_metrics": {}, "affected_groups": [], "disparity_by_attribute": {}},
+            "proxy_risks": [],
+            "mitigation": {"methods_applied": [], "bias_reduction_pct": 0, "accuracy_tradeoff_pct": 0, "impact_summary": "N/A"},
+            "risk_assessment": {"risk_level": "Unknown", "risk_score": 0.0, "components": {}},
+            "decision": {"status": "Unknown", "confidence": 0.0, "reason": str(e), "summary": "Passport generation failed."},
+            "audit_trace": {"steps": [], "timestamped_events": []},
+            "ai_insights": "N/A",
+        }
+
+    # --- Persist to Firestore (non-blocking; failure does not break response) ---
+    try:
+        from firebase_client import get_firestore_client
+        from datetime import datetime, timezone
+        db = get_firestore_client()
+        now = datetime.now(timezone.utc)
+        # Firestore cannot store nested lists of dicts directly for every type,
+        # so we serialise audit_trace separately.
+        db.collection("fairness_passports").document(job_id).set({
+            **{k: v for k, v in passport.items() if k != "audit_trace"},
+            "audit_trace_steps": passport.get("audit_trace", {}).get("steps", []),
+            "job_id": job_id,
+            "created_at": now,
+        })
+        logger.info("Passport saved to Firestore for job_id=%s", job_id)
+    except Exception as fs_err:
+        logger.warning("Firestore save skipped for job_id=%s: %s", job_id, str(fs_err))
+
+    return passport
 
 
 # ---------------------------------------------------------------------------

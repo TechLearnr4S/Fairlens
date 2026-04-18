@@ -16,6 +16,11 @@ interface AuditState {
   simulation: any | null;
   isExplaining: boolean;
   isSimulating: boolean;
+  proxyRisks: any[];
+  proxySummary: any | null;
+  proxyAiInsight: any | null;
+  isProxyAnalyzing: boolean;
+  isExplainingProxy: boolean;
   
   setFile: (file: File | null) => void;
   setJobId: (id: string | null) => void;
@@ -32,6 +37,11 @@ interface AuditState {
   setSimulation: (data: any | null) => void;
   setIsExplaining: (status: boolean) => void;
   setIsSimulating: (status: boolean) => void;
+  setProxyRisks: (data: any[]) => void;
+  setProxySummary: (data: any | null) => void;
+  setIsProxyAnalyzing: (status: boolean) => void;
+  setProxyAiInsight: (data: any | null) => void;
+  setIsExplainingProxy: (status: boolean) => void;
   reset: () => void;
 }
 
@@ -51,6 +61,11 @@ export const useAuditStore = create<AuditState>((set) => ({
   simulation: null,
   isExplaining: false,
   isSimulating: false,
+  proxyRisks: [],
+  proxySummary: null,
+  proxyAiInsight: null,
+  isProxyAnalyzing: false,
+  isExplainingProxy: false,
   
   setFile: (file) => set({ currentFile: file }),
   setJobId: (id) => set({ jobId: id }),
@@ -71,6 +86,11 @@ export const useAuditStore = create<AuditState>((set) => ({
   setSimulation: (data) => set({ simulation: data }),
   setIsExplaining: (status) => set({ isExplaining: status }),
   setIsSimulating: (status) => set({ isSimulating: status }),
+  setProxyRisks: (data) => set({ proxyRisks: data }),
+  setProxySummary: (data) => set({ proxySummary: data }),
+  setIsProxyAnalyzing: (status) => set({ isProxyAnalyzing: status }),
+  setProxyAiInsight: (data) => set({ proxyAiInsight: data }),
+  setIsExplainingProxy: (status) => set({ isExplainingProxy: status }),
   reset: () => set({
     currentFile: null,
     jobId: null,
@@ -82,6 +102,11 @@ export const useAuditStore = create<AuditState>((set) => ({
     isUploading: false,
     disparities: null,
     proxies: [],
+    proxyRisks: [],
+    proxySummary: null,
+    proxyAiInsight: null,
+    isProxyAnalyzing: false,
+    isExplainingProxy: false,
     explanation: null,
     aiInsight: null,
     simulation: null,

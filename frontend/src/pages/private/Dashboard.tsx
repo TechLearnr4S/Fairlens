@@ -4,6 +4,7 @@ import { Activity, ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle, Dow
 import { useAuditStore } from '../../store/auditStore';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
 import AuditComments from '../../features/comments/AuditComments';
+import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
 
 export default function Dashboard() {
   const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
@@ -183,39 +184,20 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* AI Explainer and Proxy Hunter */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-           <div className="glass-panel p-6 lg:col-span-2 bg-gradient-to-br from-dark-800 to-indigo-950/20 border-indigo-500/30">
-              <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                 <AlertTriangle className="text-indigo-400" />
-                 AI Auditor Explanation
-              </h3>
-              <div className="text-slate-300 space-y-4 leading-relaxed whitespace-pre-wrap">
-                 {explanation || "No explanation available. Check API key."}
-              </div>
-           </div>
+        {/* AI Explainer */}
+        <div className="glass-panel p-6 mt-6 bg-gradient-to-br from-dark-800 to-indigo-950/20 border-indigo-500/30">
+          <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
+            <AlertTriangle className="text-indigo-400" />
+            AI Auditor Explanation
+          </h3>
+          <div className="text-slate-300 space-y-4 leading-relaxed whitespace-pre-wrap">
+            {explanation || "No explanation available. Run the initial audit to see insights."}
+          </div>
+        </div>
 
-           <div className="glass-panel p-6 lg:col-span-1 border-rose-500/20">
-             <h3 className="text-xl font-semibold mb-4 flex items-center gap-2 text-rose-400">
-               Proxy Bias Hunter
-             </h3>
-             <p className="text-sm text-slate-400 mb-6">Variables strongly correlated with protected traits.</p>
-             <div className="space-y-4">
-               {proxies && proxies.length > 0 ? (
-                 proxies.map((px: any, i: number) => (
-                   <div key={i} className="p-3 bg-dark-900 border border-slate-700 rounded-lg">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="font-semibold text-rose-300">{px.proxy_feature}</span>
-                        <span className="text-xs bg-dark-700 px-2 py-0.5 rounded text-rose-200">{px.severity} Correlation</span>
-                      </div>
-                      <p className="text-xs text-slate-400">Acts as a proxy for <strong>{px.protected_attribute}</strong> (Score: {px.correlation_score})</p>
-                   </div>
-                 ))
-               ) : (
-                 <p className="text-slate-500 text-sm">No high-risk proxies found.</p>
-               )}
-             </div>
-           </div>
+        {/* New Detailed Proxy Bias Hunter */}
+        <div className="mt-6">
+          <ProxyBiasHunter />
         </div>
 
         {/* Collaborative Comments */}

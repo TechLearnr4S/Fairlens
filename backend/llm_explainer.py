@@ -2,13 +2,15 @@ import os
 import json
 from google import genai
 from google.genai import types
+from config import GEMINI_API_KEY
+from services.gemini_service import generate_proxy_explanation
 
 def generate_fairness_explanation(disparities: dict, proxies: list) -> dict:
     """
     Generates a structured, detailed summary of the fairness audit results.
     Uses Gemini API if present, otherwise returns a mock structured response.
     """
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = GEMINI_API_KEY
     findings_context = f"Disparities: {disparities}\nProxy Bias Flags: {proxies}"
     
     if api_key:

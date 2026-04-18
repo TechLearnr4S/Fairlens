@@ -4,5 +4,8 @@ pydantic
 pandas
 numpy
 scikit-learn
-google-genai
+scipy
+google-generativeai
 python-multipart
+firebase-admin
+python-dotenv

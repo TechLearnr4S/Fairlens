@@ -6,6 +6,7 @@ import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Responsi
 import AuditComments from '../../features/comments/AuditComments';
 import FairnessCopilot from '../../components/audit/FairnessCopilot';
 import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
+import BiasSandbox from '../../components/audit/BiasSandbox';
 
 export default function Dashboard() {
   const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
@@ -204,6 +205,11 @@ export default function Dashboard() {
         {/* New Detailed Proxy Bias Hunter */}
         <div className="mt-6">
           <ProxyBiasHunter />
+        </div>
+
+        {/* Bias Simulation Sandbox */}
+        <div className="mt-6">
+          <BiasSandbox />
         </div>
 
         {/* Collaborative Comments */}

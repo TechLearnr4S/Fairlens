@@ -23,6 +23,7 @@ from firebase_client import (
     get_proxy_flags,
     save_proxy_explanation,
 )
+from services.agent_orchestrator import run_fairness_copilot
 
 # In-memory storage for MVP (In production, load from Cloud Storage/Firestore)
 # Format: { job_id: {"df": DataFrame, "results": dict, "config": dict} }
@@ -485,3 +486,24 @@ async def explain_proxy_bias_firebase(audit_id: str):
         "audit_id": audit_id,
         "explanation": explanation_text,
     }
+
+
+@app.post("/audits/{audit_id}/copilot")
+async def run_fairness_copilot_api(audit_id: str):
+    """
+    Trigger the Multi-Agent Fairness Copilot pipeline.
+    Coordinates specialized AI agents for a unified intelligence report.
+    """
+    if not check_rate_limit(audit_id):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a minute.")
+
+    try:
+        report = await run_fairness_copilot(audit_id)
+        if "error" in report:
+            raise HTTPException(status_code=400, detail=report["error"])
+        return report
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Multi-agent orchestration failed: {e}",
+        )

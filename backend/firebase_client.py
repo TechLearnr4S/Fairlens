@@ -274,3 +274,71 @@ def save_proxy_explanation(audit_id: str, explanation: str) -> str:
     
     logger.info("Saved proxy_explanation for audit '%s'.", audit_id)
     return doc_ref.id
+
+
+def get_fairness_results(audit_id: str) -> dict[str, Any]:
+    """
+    Retrieve fairness disparity results from Firestore.
+    Assumption: saved under audits/{audit_id} in 'results' field.
+    """
+    db = get_firestore_client()
+    doc = db.collection("audits").document(audit_id).get()
+    if not doc.exists:
+        return {}
+    return doc.to_dict().get("results", {}).get("disparities", {})
+
+
+def get_simulation_results(audit_id: str) -> dict[str, Any]:
+    """
+    Retrieve bias simulation results from Firestore.
+    Assumption: saved under audits/{audit_id} in 'results' field.
+    """
+    db = get_firestore_client()
+    doc = db.collection("audits").document(audit_id).get()
+    if not doc.exists:
+        return {}
+    return doc.to_dict().get("results", {}).get("simulation", {})
+
+
+def save_copilot_summary(audit_id: str, summary: dict[str, Any]) -> str:
+    """
+    Persist the Multi-Agent Orchestrator's unified summary to Firestore.
+    """
+    db = get_firestore_client()
+    now = datetime.now(timezone.utc)
+    
+    doc_ref = db.collection("copilot_summaries").document(audit_id)
+    doc_ref.set({
+        "audit_id": audit_id,
+        "summary": summary,
+        "created_at": now
+    })
+    
+    logger.info("Saved copilot_summary for audit '%s'.", audit_id)
+    return doc_ref.id
+
+
+def get_copilot_cache(audit_id: str) -> dict[str, Any] | None:
+    """
+    Retrieve cached copilot results from Firestore.
+    """
+    db = get_firestore_client()
+    doc = db.collection("copilot_results").document(audit_id).get()
+    if doc.exists:
+        return doc.to_dict()
+    return None
+
+
+def save_copilot_cache(audit_id: str, data: dict[str, Any]) -> None:
+    """
+    Caches the consolidated copilot result in Firestore.
+    """
+    db = get_firestore_client()
+    now = datetime.now(timezone.utc)
+    
+    db.collection("copilot_results").document(audit_id).set({
+        **data,
+        "audit_id": audit_id,
+        "created_at": now
+    })
+    logger.info("Cached copilot result for audit '%s'.", audit_id)

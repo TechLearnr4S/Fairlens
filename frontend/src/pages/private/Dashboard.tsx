@@ -4,7 +4,7 @@ import { Activity, ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle, Dow
 import { useAuditStore } from '../../store/auditStore';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
 import AuditComments from '../../features/comments/AuditComments';
-import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
+import FairnessCopilot from '../../components/audit/FairnessCopilot';
 
 export default function Dashboard() {
   const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
@@ -182,6 +182,11 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* AI Fairness Copilot - Multi-Agent Dashboard */}
+        <div className="mt-6">
+          <FairnessCopilot />
         </div>
 
         {/* AI Explainer */}

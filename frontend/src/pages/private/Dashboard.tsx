@@ -8,6 +8,7 @@ import FairnessCopilot from '../../components/audit/FairnessCopilot';
 import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
 import BiasSandbox from '../../components/audit/BiasSandbox';
 import FairnessPassport from '../../components/audit/FairnessPassport';
+import AuditIntegrity from '../../components/audit/AuditIntegrity';
 
 export default function Dashboard() {
   const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
@@ -176,6 +177,11 @@ export default function Dashboard() {
         {/* Fairness Passport — governance dashboard */}
         <div className="mt-6">
           <FairnessPassport />
+        </div>
+
+        {/* Audit Integrity — hash-chain verification */}
+        <div className="mt-6">
+          <AuditIntegrity />
         </div>
       </div>
     );

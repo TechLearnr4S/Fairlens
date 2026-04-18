@@ -9,3 +9,4 @@ google-generativeai
 python-multipart
 firebase-admin
 python-dotenv
+cryptography

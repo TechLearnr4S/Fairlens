@@ -1,13 +1,22 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import os
+import asyncio
+import concurrent.futures
+from datetime import datetime
 import io
 import json
+import logging
+import os
 import uuid
 import time
-import logging
+import pandas as pd
 
+# ── Structured logging ─────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 from fairness_engine import compute_disparities
@@ -24,6 +33,10 @@ from firebase_client import (
     save_proxy_explanation,
 )
 from services.agent_orchestrator import run_fairness_copilot
+from audit_log import append_audit_log, get_audit_chain, verify_chain, run_verification_engine
+from signing import get_public_key_pem, get_public_key_hex
+from cache import cache_get, cache_set, cache_stats
+from validation import validate_dataset, validate_audit_config, sanitize_string
 
 # In-memory storage for MVP (In production, load from Cloud Storage/Firestore)
 # Format: { job_id: {"df": DataFrame, "results": dict, "config": dict} }
@@ -60,7 +73,11 @@ def check_rate_limit(client_id: str):
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "FairLens Studio API backend running"}
+    return {
+        "status": "ok",
+        "message": "FairLens Studio API",
+        "cache": cache_stats(),
+    }
 
 @app.post("/audits/upload")
 async def upload_dataset(file: UploadFile = File(...)):
@@ -69,25 +86,29 @@ async def upload_dataset(file: UploadFile = File(...)):
     
     contents = await file.read()
     try:
-        df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
-        columns = df.columns.tolist()
-        
-        job_id = str(uuid.uuid4())
-        LOCAL_DATASTORE[job_id] = {
-            "df": df,
-            "filename": file.filename,
-            "results": {},
-            "config": {}
-        }
-        
-        return {
-            "job_id": job_id,
-            "filename": file.filename,
-            "columns": columns,
-            "row_count": len(df)
-        }
+        df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error parsing CSV: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"CSV parse error: {e}")
+
+    # Validate dataset
+    try:
+        warnings = validate_dataset(df, file.filename or "unknown")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    columns = df.columns.tolist()
+    job_id  = str(uuid.uuid4())
+
+    LOCAL_DATASTORE[job_id] = {
+        "df":          df,
+        "filename":    sanitize_string(file.filename or "unknown"),
+        "results":     {},
+        "config":      {},
+        "row_count":   len(df),
+        "upload_time": datetime.utcnow().isoformat() + "Z",
+    }
+    logger.info("UPLOAD | job_id=%s filename=%s rows=%d cols=%d",
+                job_id, file.filename, len(df), len(df.columns))
 
 class AuditRunRequest(BaseModel):
     target_column: str
@@ -101,31 +122,73 @@ class SimulationRequest(BaseModel):
 async def run_audit(job_id: str, payload: AuditRunRequest):
     if job_id not in LOCAL_DATASTORE:
         raise HTTPException(status_code=404, detail="Dataset not found")
-        
+
+    logger.info("AUDIT_RUN START | job_id=%s target=%s", job_id, payload.target_column)
     df = LOCAL_DATASTORE[job_id]["df"]
-    
+
+    # Validate config
     try:
-        disparities = compute_disparities(df, payload.target_column, payload.protected_attributes)
-        proxies = identify_proxies(df, payload.protected_attributes, top_n=3)
-        
-        # Save results for subsequent calls
-        LOCAL_DATASTORE[job_id]["results"] = {
+        config_warnings = validate_audit_config(df, payload.target_column, payload.protected_attributes)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # Cache check
+    cache_params = {"target": payload.target_column, "protected": sorted(payload.protected_attributes)}
+    cached = cache_get(job_id, "audit_run", cache_params)
+    if cached:
+        logger.info("AUDIT_RUN cache hit | job_id=%s", job_id)
+        return {**cached, "cached": True}
+
+    try:
+        # Run fairness + proxy detection concurrently
+        loop = asyncio.get_event_loop()
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+        disp_future = loop.run_in_executor(
+            executor, compute_disparities, df, payload.target_column, payload.protected_attributes
+        )
+        prox_future = loop.run_in_executor(
+            executor, identify_proxies, df, payload.protected_attributes, 3
+        )
+        disparities, proxies = await asyncio.gather(disp_future, prox_future)
+
+        LOCAL_DATASTORE[job_id]["results"] = {"disparities": disparities, "proxies": proxies}
+        LOCAL_DATASTORE[job_id]["config"]  = {
+            "target":    payload.target_column,
+            "protected": payload.protected_attributes,
+        }
+        LOCAL_DATASTORE[job_id]["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+
+        result = {
+            "status":     "success",
+            "job_id":     job_id,
             "disparities": disparities,
-            "proxies": proxies
+            "proxies":    proxies,
+            "warnings":   config_warnings,
         }
-        LOCAL_DATASTORE[job_id]["config"] = {
-            "target": payload.target_column,
-            "protected": payload.protected_attributes
-        }
-        
-        return {
-            "status": "success",
-            "job_id": job_id,
-            "disparities": disparities,
-            "proxies": proxies
-        }
+        cache_set(job_id, "audit_run", result, cache_params)
+
+        # Audit log
+        try:
+            append_audit_log(
+                audit_id=job_id, action="FAIRNESS_RUN",
+                metadata={
+                    "target_column":         payload.target_column,
+                    "protected_attributes":  payload.protected_attributes,
+                    "attributes_scanned":    len(disparities),
+                    "proxies_found":         len(proxies),
+                },
+            )
+        except Exception:
+            pass
+
+        logger.info("AUDIT_RUN END | job_id=%s disparities=%d proxies=%d",
+                    job_id, len(disparities), len(proxies))
+        return result
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        logger.error("AUDIT_RUN FAILED | job_id=%s error=%s", job_id, e)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
 
 @app.post("/audits/{job_id}/explain")
 async def explain_audit(job_id: str):
@@ -135,7 +198,18 @@ async def explain_audit(job_id: str):
     res = LOCAL_DATASTORE[job_id]["results"]
     explanation = generate_fairness_explanation(res["disparities"], res["proxies"])
     LOCAL_DATASTORE[job_id]["results"]["explanation"] = explanation
-    
+    LOCAL_DATASTORE[job_id]["explain_time"] = datetime.utcnow().isoformat() + "Z"
+
+    # Hash-chained log: explanation generated
+    try:
+        append_audit_log(
+            audit_id=job_id,
+            action="EXPLANATION_GENERATED",
+            metadata={"generator": "Gemini AI Auditor"},
+        )
+    except Exception:
+        pass
+
     return explanation
 
 @app.post("/audits/{job_id}/simulate")
@@ -157,6 +231,24 @@ async def simulate_mitigation(job_id: str, payload: SimulationRequest):
         raise HTTPException(status_code=400, detail=simulation["error"])
 
     LOCAL_DATASTORE[job_id]["results"]["simulation"] = simulation
+    LOCAL_DATASTORE[job_id]["simulation_time"] = datetime.utcnow().isoformat() + "Z"
+
+    # Hash-chained log: simulation applied
+    try:
+        delta = simulation.get("delta", {})
+        append_audit_log(
+            audit_id=job_id,
+            action="SIMULATION_APPLIED",
+            metadata={
+                "method": payload.method,
+                "params": payload.params,
+                "bias_reduction_pct": delta.get("disparity_reduction_pct", 0),
+                "accuracy_change_pct": delta.get("accuracy_change_pct", 0),
+            },
+        )
+    except Exception:
+        pass
+
     return simulation
 
 @app.get("/audits/{job_id}/passport")
@@ -192,8 +284,6 @@ async def get_passport(job_id: str):
         from datetime import datetime, timezone
         db = get_firestore_client()
         now = datetime.now(timezone.utc)
-        # Firestore cannot store nested lists of dicts directly for every type,
-        # so we serialise audit_trace separately.
         db.collection("fairness_passports").document(job_id).set({
             **{k: v for k, v in passport.items() if k != "audit_trace"},
             "audit_trace_steps": passport.get("audit_trace", {}).get("steps", []),
@@ -204,7 +294,229 @@ async def get_passport(job_id: str):
     except Exception as fs_err:
         logger.warning("Firestore save skipped for job_id=%s: %s", job_id, str(fs_err))
 
+    # Hash-chained log: passport generated
+    try:
+        append_audit_log(
+            audit_id=job_id,
+            action="PASSPORT_GENERATED",
+            metadata={
+                "schema_version": passport.get("schema_version", "2.0"),
+                "decision": passport.get("decision", {}).get("status", "Unknown"),
+                "risk_level": passport.get("risk_assessment", {}).get("risk_level", "Unknown"),
+                "risk_score": passport.get("risk_assessment", {}).get("risk_score", 0.0),
+            },
+        )
+    except Exception:
+        pass
+
     return passport
+
+
+# ---------------------------------------------------------------------------
+# Hash-Chained Audit Logs
+# ---------------------------------------------------------------------------
+
+@app.get("/audits/{job_id}/logs")
+async def get_audit_logs(job_id: str):
+    """
+    Retrieve the complete hash-chained audit log for a given job, in
+    chronological order.  Each entry contains its SHA-256 hash and the
+    hash of the previous entry so the caller can independently verify
+    chain integrity.
+    """
+    chain = get_audit_chain(job_id)
+    return {
+        "job_id": job_id,
+        "total_entries": len(chain),
+        "chain": chain,
+    }
+
+
+@app.get("/audits/{job_id}/logs/verify")
+async def verify_audit_logs(job_id: str):
+    """
+    Quick chain integrity check (uses verify_chain — returns compact summary).
+    For the detailed per-step report, use GET /audits/{job_id}/verify.
+    """
+    chain = get_audit_chain(job_id)
+    result = verify_chain(chain)
+    return {
+        "job_id": job_id,
+        **result,
+    }
+
+
+@app.get("/audits/{job_id}/verify")
+async def verify_audit_integrity(job_id: str):
+    """
+    Full audit chain verification engine.
+
+    Iterates every log entry and runs three checks:
+      1. Hash integrity   — recomputes SHA-256, compares with stored value
+      2. Chain linkage    — verifies prev_hash matches the preceding entry
+      3. Signature check  — validates Ed25519 signature against server public key
+
+    Returns a structured report:
+      {
+        "is_valid":      bool,         // overall pass/fail
+        "broken_at":     int | null,   // index of first failure
+        "total_entries": int,
+        "checks_passed": int,
+        "checks_failed": int,
+        "steps":         [...],        // per-entry check detail
+        "failure":       {...} | null, // detail of first broken entry
+        "summary":       str
+      }
+    """
+    try:
+        report = run_verification_engine(job_id)
+    except Exception as e:
+        logger.error("Verification engine failed for job_id=%s: %s", job_id, e)
+        report = {
+            "is_valid": False,
+            "broken_at": None,
+            "total_entries": 0,
+            "checks_passed": 0,
+            "checks_failed": 0,
+            "steps": [],
+            "failure": {"reason": str(e)},
+            "summary": f"Verification engine error: {e}",
+        }
+    return {
+        "job_id": job_id,
+        **report,
+    }
+
+
+@app.get("/audit-logs/public-key")
+async def get_signing_public_key():
+    """
+    Return the server's Ed25519 public key.
+
+    Third parties can use this key to independently verify that every
+    audit log entry was produced by this FairLens Studio server instance
+    and has not been tampered with since it was signed.
+
+    Returns both:
+      - pem  : PEM-encoded key (for use with openssl / Python cryptography)
+      - hex  : Raw 32-byte public key as a 64-char hex string
+      - algorithm : "Ed25519"
+    """
+    try:
+        return {
+            "algorithm": "Ed25519",
+            "public_key_pem": get_public_key_pem(),
+            "public_key_hex": get_public_key_hex(),
+            "usage": "Verify the 'signature' field in each audit log entry using this key.",
+        }
+    except Exception as e:
+        logger.error("Failed to retrieve signing public key: %s", e)
+        raise HTTPException(status_code=500, detail="Signing key unavailable")
+
+
+@app.get("/audits/{job_id}/proof")
+async def export_audit_proof(job_id: str):
+    """
+    Generate a complete, verifiable audit proof bundle.
+
+    Packages together:
+      - All audit log entries (hashes + signatures)
+      - Full verification report (per-step check results)
+      - Server public key (for independent verification)
+      - Signed proof certificate
+
+    This bundle can be downloaded as JSON and shared with auditors,
+    regulators, or compliance teams to prove the audit chain's integrity
+    without access to the FairLens server.
+    """
+    from datetime import datetime, timezone as tz
+
+    # 1. Fetch full chain
+    chain = get_audit_chain(job_id)
+
+    # 2. Run full verification
+    try:
+        verification = run_verification_engine(job_id)
+    except Exception as e:
+        verification = {
+            "is_valid": False,
+            "broken_at": None,
+            "total_entries": 0,
+            "checks_passed": 0,
+            "checks_failed": 0,
+            "steps": [],
+            "failure": {"reason": str(e)},
+            "summary": f"Verification failed: {e}",
+        }
+
+    # 3. Fetch public key
+    try:
+        pub_key_pem = get_public_key_pem()
+        pub_key_hex = get_public_key_hex()
+    except Exception:
+        pub_key_pem = "unavailable"
+        pub_key_hex = "unavailable"
+
+    # 4. Build proof certificate
+    now = datetime.now(tz.utc).isoformat()
+    is_valid = verification.get("is_valid", False)
+
+    # Sign the certificate payload for tamper evidence
+    import hashlib
+    cert_payload = f"{job_id}|{now}|{is_valid}|{len(chain)}"
+    cert_hash = hashlib.sha256(cert_payload.encode()).hexdigest()
+    try:
+        from signing import sign_hash
+        cert_signature = sign_hash(cert_hash)
+    except Exception:
+        cert_signature = "unavailable"
+
+    proof = {
+        "proof_type": "FairLens Audit Integrity Proof",
+        "schema_version": "1.0",
+        "generated_at": now,
+        "job_id": job_id,
+        "integrity_proof": {
+            "status": "VERIFIED" if is_valid else "TAMPERED",
+            "label": "Integrity Proof: Verified" if is_valid else "Integrity Proof: FAILED",
+            "is_valid": is_valid,
+            "broken_at": verification.get("broken_at"),
+            "total_entries": verification.get("total_entries", len(chain)),
+            "checks_passed": verification.get("checks_passed", 0),
+            "checks_failed": verification.get("checks_failed", 0),
+            "summary": verification.get("summary", ""),
+        },
+        "certificate": {
+            "issued_at": now,
+            "issuer": "FairLens Studio Governance Engine",
+            "subject": f"Audit Job {job_id}",
+            "hash": cert_hash,
+            "signature": cert_signature,
+            "algorithm": "Ed25519 + SHA-256",
+        },
+        "public_key": {
+            "algorithm": "Ed25519",
+            "pem": pub_key_pem,
+            "hex": pub_key_hex,
+            "usage": "Use this key to independently verify each log entry signature.",
+        },
+        "audit_chain": [
+            {
+                "index": i,
+                "log_id": entry.get("log_id", ""),
+                "action": entry.get("action", ""),
+                "timestamp": entry.get("timestamp", ""),
+                "metadata": entry.get("metadata", {}),
+                "prev_hash": entry.get("prev_hash", ""),
+                "hash": entry.get("hash", ""),
+                "signature": entry.get("signature", ""),
+            }
+            for i, entry in enumerate(chain)
+        ],
+        "verification_steps": verification.get("steps", []),
+    }
+
+    return proof
 
 
 # ---------------------------------------------------------------------------

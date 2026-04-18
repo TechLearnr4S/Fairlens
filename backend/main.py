@@ -14,7 +14,7 @@ from fairness_engine import compute_disparities
 from proxy_detector import identify_proxies
 from llm_explainer import generate_fairness_explanation, generate_proxy_explanation
 from governance import generate_audit_receipt, generate_fairness_passport
-from bias_simulator import simulate_threshold_adjustment
+from bias_simulator import simulate_mitigation_enhanced
 from correlation_engine import run_correlation_analysis, compute_proxy_risk
 from firebase_client import (
     download_dataset_as_dataframe,
@@ -93,6 +93,10 @@ class AuditRunRequest(BaseModel):
     target_column: str
     protected_attributes: list[str]
 
+class SimulationRequest(BaseModel):
+    method: str
+    params: dict = {}
+
 @app.post("/audits/{job_id}/run")
 async def run_audit(job_id: str, payload: AuditRunRequest):
     if job_id not in LOCAL_DATASTORE:
@@ -135,18 +139,24 @@ async def explain_audit(job_id: str):
     return explanation
 
 @app.post("/audits/{job_id}/simulate")
-async def simulate_mitigation(job_id: str):
+async def simulate_mitigation(job_id: str, payload: SimulationRequest):
     if job_id not in LOCAL_DATASTORE or "target" not in LOCAL_DATASTORE[job_id]["config"]:
-        raise HTTPException(status_code=404, detail="Audit config not found")
+        raise HTTPException(status_code=404, detail="Audit config not found. Run the audit first.")
         
     data = LOCAL_DATASTORE[job_id]
-    simulation = simulate_threshold_adjustment(
+    simulation = simulate_mitigation_enhanced(
+        job_id,
         data["df"], 
         data["config"]["target"], 
-        data["config"]["protected"]
+        data["config"]["protected"],
+        payload.method,
+        payload.params
     )
-    LOCAL_DATASTORE[job_id]["results"]["simulation"] = simulation
     
+    if "error" in simulation:
+        raise HTTPException(status_code=400, detail=simulation["error"])
+
+    LOCAL_DATASTORE[job_id]["results"]["simulation"] = simulation
     return simulation
 
 @app.get("/audits/{job_id}/passport")

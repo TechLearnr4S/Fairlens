@@ -1,61 +1,17 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle, Download, Loader } from 'lucide-react';
+import { Activity, ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle, Download } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import AuditComments from '../../features/comments/AuditComments';
 import FairnessCopilot from '../../components/audit/FairnessCopilot';
 import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
 import BiasSandbox from '../../components/audit/BiasSandbox';
+import FairnessPassport from '../../components/audit/FairnessPassport';
 
 export default function Dashboard() {
   const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
-  const [isExporting, setIsExporting] = useState(false);
 
-  const handleExport = async () => {
-     setIsExporting(true);
-     try {
-       const res = await fetch('http://localhost:8000/audits/passport', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-           job_id: jobId,
-           filename: currentFile?.name,
-           target_column: targetColumn,
-           protected_attributes: protectedAttributes,
-           disparities: disparities,
-           proxies: proxies,
-           explanation: explanation
-         })
-       });
-       
-       const data = await res.json();
-       if (data.markdown && data.receipt) {
-         // Trigger Markdown Download
-         const mdBlob = new Blob([data.markdown], { type: 'text/markdown' });
-         const mdUrl = URL.createObjectURL(mdBlob);
-         const mdLink = document.createElement('a');
-         mdLink.href = mdUrl;
-         mdLink.download = `Fairness_Passport_${jobId}.md`;
-         mdLink.click();
-         
-         // Trigger JSON Receipt Download
-         setTimeout(() => {
-            const jsonBlob = new Blob([JSON.stringify(data.receipt, null, 2)], { type: 'application/json' });
-            const jsonUrl = URL.createObjectURL(jsonBlob);
-            const jsonLink = document.createElement('a');
-            jsonLink.href = jsonUrl;
-            jsonLink.download = `Audit_Receipt_${jobId}.json`;
-            jsonLink.click();
-         }, 500);
-       }
-     } catch (e) {
-       console.error(e);
-       alert("Failed to export governance documents.");
-     } finally {
-       setIsExporting(false);
-     }
-  };
 
   if (disparities) {
     // Transform data for charts
@@ -217,16 +173,9 @@ export default function Dashboard() {
           <AuditComments jobId={jobId!} />
         </div>
 
-        {/* Governance Exports */}
-        <div className="flex justify-end mt-8 border-t border-slate-700/50 pt-8">
-           <button 
-             onClick={handleExport}
-             disabled={isExporting}
-             className="px-4 py-2 bg-gradient-to-r from-primary-500 to-indigo-500 hover:from-primary-400 hover:to-indigo-400 text-white rounded-lg font-medium shadow-lg flex items-center gap-2"
-           >
-             {isExporting ? <Loader className="animate-spin" size={18} /> : <Download size={18} />}
-             Download Passport & Receipt
-           </button>
+        {/* Fairness Passport — governance dashboard */}
+        <div className="mt-6">
+          <FairnessPassport />
         </div>
       </div>
     );

@@ -4,6 +4,8 @@ interface AuditState {
   currentFile: File | null;
   jobId: string | null;
   columns: string[];
+  columnTypes: Record<string, string>;
+  preview: any[];
   targetColumn: string | null;
   protectedAttributes: string[];
   isUploading: boolean;
@@ -14,18 +16,23 @@ interface AuditState {
   setFile: (file: File | null) => void;
   setJobId: (id: string | null) => void;
   setColumns: (cols: string[]) => void;
-  setTargetColumn: (col: string) => void;
+  setColumnTypes: (types: Record<string, string>) => void;
+  setPreview: (data: any[]) => void;
+  setTargetColumn: (col: string | null) => void;
   toggleProtectedAttribute: (col: string) => void;
   setIsUploading: (status: boolean) => void;
   setDisparities: (data: any) => void;
   setProxies: (data: any[]) => void;
   setExplanation: (text: string | null) => void;
+  reset: () => void;
 }
 
 export const useAuditStore = create<AuditState>((set) => ({
   currentFile: null,
   jobId: null,
   columns: [],
+  columnTypes: {},
+  preview: [],
   targetColumn: null,
   protectedAttributes: [],
   isUploading: false,
@@ -36,6 +43,8 @@ export const useAuditStore = create<AuditState>((set) => ({
   setFile: (file) => set({ currentFile: file }),
   setJobId: (id) => set({ jobId: id }),
   setColumns: (cols) => set({ columns: cols }),
+  setColumnTypes: (types) => set({ columnTypes: types }),
+  setPreview: (data) => set({ preview: data }),
   setTargetColumn: (col) => set({ targetColumn: col }),
   toggleProtectedAttribute: (col) => set((state) => ({
     protectedAttributes: state.protectedAttributes.includes(col)
@@ -46,4 +55,17 @@ export const useAuditStore = create<AuditState>((set) => ({
   setDisparities: (data) => set({ disparities: data }),
   setProxies: (data) => set({ proxies: data }),
   setExplanation: (text) => set({ explanation: text }),
+  reset: () => set({
+    currentFile: null,
+    jobId: null,
+    columns: [],
+    columnTypes: {},
+    preview: [],
+    targetColumn: null,
+    protectedAttributes: [],
+    isUploading: false,
+    disparities: null,
+    proxies: [],
+    explanation: null,
+  }),
 }));

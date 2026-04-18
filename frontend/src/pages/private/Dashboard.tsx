@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Activity, ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle, Download, Loader } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
+import AuditComments from '../../features/comments/AuditComments';
 
 export default function Dashboard() {
   const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
@@ -93,32 +94,88 @@ export default function Dashboard() {
           </div>
 
           <div className="glass-panel p-6 lg:col-span-2">
-            <h3 className="text-xl font-semibold mb-6">Selection Rates by Subgroup</h3>
-            <div className="space-y-8">
+            <h3 className="text-xl font-semibold mb-6">Subgroup Metrics Comparison</h3>
+            <div className="space-y-12">
               {Object.keys(disparities).map(attr => (
-                <div key={attr} className="space-y-4">
+                <div key={attr} className="space-y-6 p-6 bg-slate-800/20 rounded-2xl border border-slate-700/50">
                    <div className="flex items-center justify-between">
-                     <h4 className="font-medium text-lg capitalize">{attr}</h4>
-                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${disparities[attr].risk_level === 'High' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                     <div>
+                       <h4 className="font-bold text-xl capitalize flex items-center gap-2">
+                         {attr}
+                         {disparities[attr].warning && <AlertTriangle className="text-rose-500" size={20} />}
+                       </h4>
+                       <p className="text-sm text-slate-400 mt-1">
+                         Group disparity score: <span className="text-primary-400 font-mono font-bold">{(disparities[attr].disparity_score * 100).toFixed(1)}%</span>
+                       </p>
+                     </div>
+                     <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest ${disparities[attr].risk_level === 'High' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
                        {disparities[attr].risk_level} Risk
                      </span>
                    </div>
-                   <div className="w-full h-40">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={disparities[attr].subgroups} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
-                        <XAxis type="number" domain={[0, 1]} hide />
-                        <YAxis dataKey="subgroup" type="category" tick={{ fill: '#cbd5e1' }} axisLine={false} tickLine={false} width={100} />
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }} />
-                        <Bar dataKey="selection_rate" name="Selection Rate" radius={[0, 4, 4, 0]}>
-                          {
-                             disparities[attr].subgroups.map((entry: any, index: number) => (
-                               <Cell key={`cell-${index}`} fill={entry.selection_rate < 0.2 ? '#f43f5e' : '#6366f1'} />
-                             ))
-                          }
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+
+                   {disparities[attr].warning && (
+                     <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-3 text-rose-300 text-sm">
+                        <AlertTriangle size={16} />
+                        <span><strong>Bias Detected:</strong> {disparities[attr].warning}</span>
+                     </div>
+                   )}
+
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-4">
+                     {/* Selection Rate Chart */}
+                     <div className="space-y-2">
+                        <h5 className="text-xs font-bold text-slate-500 uppercase">Selection Rate</h5>
+                        <div className="w-full h-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={disparities[attr].subgroups} layout="vertical" margin={{ left: 20 }}>
+                              <XAxis type="number" domain={[0, 1]} hide />
+                              <YAxis dataKey="subgroup" type="category" tick={{ fill: '#94a3b8', fontSize: 12 }} width={80} />
+                              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px' }} />
+                              <Bar dataKey="selection_rate" name="Selection Rate" radius={[0, 4, 4, 0]}>
+                                {disparities[attr].subgroups.map((entry: any, index: number) => (
+                                  <Cell key={`cell-${index}`} fill={entry.selection_rate < 0.2 ? '#f43f5e' : '#0ea5e9'} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                     </div>
+
+                     {/* Accuracy Chart */}
+                     <div className="space-y-2">
+                        <h5 className="text-xs font-bold text-slate-500 uppercase">Model Accuracy</h5>
+                        <div className="w-full h-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={disparities[attr].subgroups} layout="vertical" margin={{ left: 20 }}>
+                              <XAxis type="number" domain={[0, 1]} hide />
+                              <YAxis dataKey="subgroup" type="category" tick={{ fill: '#94a3b8', fontSize: 12 }} width={80} />
+                              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px' }} />
+                              <Bar dataKey="accuracy" name="Accuracy" radius={[0, 4, 4, 0]}>
+                                {disparities[attr].subgroups.map((entry: any, index: number) => (
+                                  <Cell key={`cell-${index}`} fill={entry.accuracy < 0.7 ? '#f59e0b' : '#10b981'} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                     </div>
+
+                     {/* FPR / FNR Small Multiples */}
+                     <div className="col-span-full grid grid-cols-2 gap-4 mt-2">
+                        <div className="p-4 bg-dark-900/50 rounded-xl border border-slate-700/30">
+                           <p className="text-[10px] font-bold text-slate-500 uppercase mb-3">False Positive Rate Disparity</p>
+                           <p className="text-xl font-bold text-white">{(disparities[attr].fpr_disparity * 100).toFixed(1)}%</p>
+                           <div className="mt-2 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-indigo-500" style={{ width: `${disparities[attr].fpr_disparity * 100}%` }} />
+                           </div>
+                        </div>
+                        <div className="p-4 bg-dark-900/50 rounded-xl border border-slate-700/30">
+                           <p className="text-[10px] font-bold text-slate-500 uppercase mb-3">False Negative Rate Disparity</p>
+                           <p className="text-xl font-bold text-white">{(disparities[attr].fnr_disparity * 100).toFixed(1)}%</p>
+                           <div className="mt-2 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-purple-500" style={{ width: `${disparities[attr].fnr_disparity * 100}%` }} />
+                           </div>
+                        </div>
+                     </div>
                    </div>
                 </div>
               ))}
@@ -159,6 +216,11 @@ export default function Dashboard() {
                )}
              </div>
            </div>
+        </div>
+
+        {/* Collaborative Comments */}
+        <div className="mt-6">
+          <AuditComments jobId={jobId!} />
         </div>
 
         {/* Governance Exports */}

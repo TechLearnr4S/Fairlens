@@ -153,7 +153,7 @@ export default function AuditIntegrity() {
     if (!jobId) return;
     setExporting(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/proof`);
+      const res = await fetch(`http://localhost:8000/audits/${jobId}/export/json`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const proof = await res.json();
       const blob = new Blob([JSON.stringify(proof, null, 2)], { type: 'application/json' });
@@ -197,6 +197,23 @@ export default function AuditIntegrity() {
     }
   };
 
+  const handleTamper = async () => {
+    if (!jobId) return;
+    if (!window.confirm("Warning: This will maliciously modify the local database to demonstrate integrity failure. Proceed?")) return;
+    
+    setLoading(true);
+    try {
+      const res = await fetch(`http://localhost:8000/audits/${jobId}/tamper`, { method: 'POST' });
+      if (!res.ok) throw new Error("Tamper simulation failed");
+      alert("Tampering complete. The hash chain has been broken.");
+      runVerification(); // Refresh the status
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const isValid   = report?.is_valid ?? null;
   const hasReport = report !== null;
 
@@ -221,33 +238,24 @@ export default function AuditIntegrity() {
           <div>
             <h2 className="text-xl font-black text-white">Audit Integrity</h2>
             <p className="text-slate-500 text-xs mt-0.5 uppercase tracking-widest font-bold">
-              Hash-Chained · Ed25519 Signed
+              Hash-Chained · Local Persistence
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap print:hidden">
-          {/* Export buttons — only shown after verification */}
-          {report && (
-            <>
-              <button
-                id="export-proof-json-btn"
-                onClick={downloadJSON}
-                disabled={exporting}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black border bg-slate-800 hover:bg-slate-700 border-slate-700 text-white transition-all"
-              >
-                {exporting ? <Loader2 size={13} className="animate-spin" /> : <FileJson size={13} />}
-                Download JSON
-              </button>
-              <button
-                id="export-proof-pdf-btn"
-                onClick={downloadPDF}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black border bg-slate-800 hover:bg-slate-700 border-slate-700 text-white transition-all"
-              >
-                <Printer size={13} /> Download PDF
-              </button>
-            </>
-          )}
+          <button
+            id="tamper-simulation-btn"
+            onClick={handleTamper}
+            disabled={loading || !jobId}
+            className={`
+              flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-black
+              transition-all border bg-slate-900/50 border-rose-500/30 text-rose-400 hover:bg-rose-500/10
+              ${(loading || !jobId) ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+          >
+            <AlertTriangle size={14} /> Simulate Tampering
+          </button>
 
           <button
             id="verify-audit-trail-btn"

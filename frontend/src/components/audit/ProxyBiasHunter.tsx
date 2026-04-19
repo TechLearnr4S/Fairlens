@@ -37,7 +37,8 @@ export default function ProxyBiasHunter() {
     setProxySummary,
     setCorrelationMatrix,
     setIsProxyAnalyzing,
-    correlationMatrix
+    correlationMatrix,
+    removeColumn
   } = useAuditStore();
 
   const runDetection = async () => {
@@ -87,7 +88,7 @@ export default function ProxyBiasHunter() {
   }));
 
   return (
-    <div className="space-y-6">
+    <div id="proxy-hunter" className="space-y-6">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -220,11 +221,19 @@ export default function ProxyBiasHunter() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-slate-200">{entry.feature}</span>
                           {entry.is_proxy && (
-                            <div className="group relative">
-                              <AlertTriangle size={14} className="text-rose-400 animate-pulse" />
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-900 text-white text-[10px] rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 border border-slate-700 shadow-2xl">
-                                This feature may indirectly encode protected attributes. Score: {entry.score.toFixed(3)}
+                            <div className="flex items-center gap-2">
+                               <div className="group relative">
+                                <AlertTriangle size={14} className="text-rose-400 animate-pulse" />
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-900 text-white text-[10px] rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 border border-slate-700 shadow-2xl">
+                                  This feature may indirectly encode protected attributes. Score: {entry.score.toFixed(3)}
+                                </div>
                               </div>
+                              <button 
+                                onClick={() => removeColumn(entry.feature)}
+                                className="opacity-0 group-hover:opacity-100 px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[9px] font-black uppercase tracking-widest rounded border border-rose-500/30 transition-all active:scale-95"
+                              >
+                                Remove Feature
+                              </button>
                             </div>
                           )}
                         </div>

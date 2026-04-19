@@ -9,9 +9,20 @@ import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
 import BiasSandbox from '../../components/audit/BiasSandbox';
 import FairnessPassport from '../../components/audit/FairnessPassport';
 import AuditIntegrity from '../../components/audit/AuditIntegrity';
+import { ModelEvaluator } from '../../components/audit/ModelEvaluator';
 
 export default function Dashboard() {
-  const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId } = useAuditStore();
+  const { disparities, targetColumn, currentFile, protectedAttributes, proxies, explanation, jobId, simulation } = useAuditStore();
+  const [summary, setSummary] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (jobId && simulation) {
+      fetch(`http://localhost:8000/audits/${jobId}/summary`)
+        .then(res => res.json())
+        .then(data => setSummary(data.story))
+        .catch(err => console.error(err));
+    }
+  }, [jobId, simulation]);
 
 
   if (disparities) {
@@ -24,23 +35,42 @@ export default function Dashboard() {
       
     return (
       <div className="space-y-6 animate-in fade-in duration-500">
-        <header className="flex items-center justify-between mb-8">
+        <header className="flex items-center justify-between mb-10">
           <div>
-            <h1 className="text-3xl font-bold text-white">Subgroup Disparity Radar</h1>
-            <p className="text-slate-400 mt-1">Audit Results for <span className="text-primary-400 font-medium">{currentFile?.name}</span> predicting <span className="text-indigo-400 font-medium">{targetColumn}</span></p>
+            <h1 className="text-4xl font-black text-white tracking-tight">Audit Insights</h1>
+            <p className="text-slate-400 mt-2 font-medium">Results for <span className="text-primary-400 font-bold underline underline-offset-4 decoration-primary-500/30">{currentFile?.name}</span> predicting <span className="text-indigo-400 font-bold">{targetColumn}</span></p>
           </div>
           <Link to="/new-audit" className="btn-secondary flex items-center gap-2 px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg font-medium transition-all duration-200 border border-slate-600">
              Start New Audit
           </Link>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="glass-panel p-6 lg:col-span-1 flex flex-col items-center justify-center">
-            <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
-              <ShieldCheck className="text-primary-500" />
+        {/* Narrative Audit Summary */}
+        {summary && (
+          <div className="mb-8 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-6 flex items-start gap-4 animate-in fade-in slide-in-from-left-4 duration-700">
+             <div className="mt-1 p-2 bg-indigo-500/20 rounded-lg text-indigo-400 shrink-0">
+                <FileLock size={20} />
+             </div>
+             <div className="space-y-1">
+                <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-1">Audit Journey Summary</h3>
+                <p className="text-slate-200 text-lg font-medium leading-relaxed italic">
+                  "{summary}"
+                </p>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2 flex items-center gap-2">
+                  <ShieldCheck size={12} className="text-emerald-500" />
+                  Synthesis of Fairness, Proxy Risks, and Simulation Results
+                </p>
+             </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="glass-panel p-8 lg:col-span-1 flex flex-col items-center justify-center hover:border-primary-500/30 transition-all duration-500 group">
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] mb-8 flex items-center gap-3 text-slate-500 group-hover:text-primary-400 transition-colors">
+              <ShieldCheck className="text-primary-500" size={16} />
               Overall Risk Profile
             </h3>
-            <div className="w-full h-64">
+            <div className="w-full h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
                   <PolarGrid stroke="#334155" />
@@ -53,11 +83,14 @@ export default function Dashboard() {
             <p className="text-sm text-slate-400 text-center mt-4">Values closer to 0 indicate higher fairness. Values above 0.2 indicate severe disparity.</p>
           </div>
 
-          <div className="glass-panel p-6 lg:col-span-2">
-            <h3 className="text-xl font-semibold mb-6">Subgroup Metrics Comparison</h3>
-            <div className="space-y-12">
+          <div className="glass-panel p-8 lg:col-span-2 hover:border-primary-500/20 transition-all duration-500">
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] mb-10 text-slate-500 flex items-center gap-3">
+              <Activity className="text-primary-500" size={16} />
+              Subgroup Metrics Comparison
+            </h3>
+            <div className="space-y-10">
               {Object.keys(disparities).map(attr => (
-                <div key={attr} className="space-y-6 p-6 bg-slate-800/20 rounded-2xl border border-slate-700/50">
+                <div key={attr} className="space-y-8 p-8 bg-slate-900/40 rounded-3xl border border-slate-800/50 hover:border-slate-700 transition-all duration-500">
                    <div className="flex items-center justify-between">
                      <div>
                        <h4 className="font-bold text-xl capitalize flex items-center gap-2">
@@ -162,6 +195,11 @@ export default function Dashboard() {
         {/* New Detailed Proxy Bias Hunter */}
         <div className="mt-6">
           <ProxyBiasHunter />
+        </div>
+
+        {/* Model Fairness Evaluation */}
+        <div className="mt-6">
+          <ModelEvaluator />
         </div>
 
         {/* Bias Simulation Sandbox */}

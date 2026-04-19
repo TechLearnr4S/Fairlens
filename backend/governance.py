@@ -211,6 +211,53 @@ def generate_decision(
     }
 
 
+def generate_narrative_summary(data: dict) -> str:
+    """
+    Combines all audit signals into a cohesive, story-like narrative summary.
+    """
+    results = data.get("results", {})
+    config = data.get("config", {})
+    
+    disparities = results.get("disparities") or {}
+    proxies = results.get("proxies") or []
+    simulation = results.get("simulation") or {}
+    
+    # 1. Identify main bias source
+    if disparities:
+        max_attr = max(disparities.keys(), key=lambda k: _safe_float(disparities[k].get("disparity_score")))
+        bias_source = f"bias across '{max_attr}' subgroups"
+    else:
+        bias_source = "minimal initial bias"
+        
+    # 2. Add proxy context
+    proxy_context = ""
+    if proxies:
+        high_risk = [p.get("feature") or p.get("proxy_feature", "unknown") for p in proxies if _safe_float(p.get("risk_score") or p.get("correlation_score") or p.get("score")) > 0.7]
+        if high_risk:
+            proxy_context = f" likely driven by '{high_risk[0]}' acting as a proxy."
+        else:
+            proxy_context = " with some features showing indirect correlation to sensitive traits."
+            
+    # 3. Add mitigation result
+    mitigation_story = "No mitigation strategy was applied."
+    if simulation:
+        delta = simulation.get("delta", {})
+        reduction = _safe_float(delta.get("disparity_reduction_pct") or simulation.get("improvement"))
+        tradeoff = _safe_float(delta.get("accuracy_change_pct") or simulation.get("accuracy_tradeoff"))
+        
+        if reduction > 20:
+            mitigation_story = f"Implementing the recommended mitigation reduced group disparity by {reduction:.1f}% with a {abs(tradeoff):.1f}% accuracy trade-off."
+        else:
+            mitigation_story = f"The attempted mitigation had a limited {reduction:.1f}% impact on reducing group disparity."
+            
+    # 4. Final conclusion (Decision)
+    risk = compute_risk_assessment(disparities, proxies)
+    decision = generate_decision(risk, disparities, proxies, simulation)
+    conclusion = f"The system is now {decision['status'].lower()} for deployment."
+    
+    return f"The model initially showed {bias_source}{proxy_context} {mitigation_story} {conclusion}"
+
+
 # ---------------------------------------------------------------------------
 # 3. Audit Trace Builder
 # ---------------------------------------------------------------------------

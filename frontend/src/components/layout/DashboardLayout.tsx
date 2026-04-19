@@ -1,6 +1,8 @@
 import { Link, Outlet, useNavigate } from 'react-router-dom';
 import { Activity, ShieldCheck, UploadCloud, Users, FileLock, LogOut } from 'lucide-react';
 import { useAuth } from '../../features/auth/AuthContext';
+import { AuditStepper } from '../audit/AuditStepper';
+import { DemoController } from '../audit/DemoController';
 
 export function DashboardLayout() {
   const { user, logout } = useAuth();
@@ -64,9 +66,11 @@ export function DashboardLayout() {
       
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-6xl mx-auto">
+          <AuditStepper />
           <Outlet />
         </div>
       </main>
+      <DemoController />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { UploadCloud, CheckCircle, ArrowRight, Loader, Table, Shield, Target, Al
 import { useNavigate } from 'react-router-dom';
 import { useAuditStore } from '../store/auditStore';
 import { auth } from '../firebase';
+import { ToastContainer, ToastType } from '../components/ui/Toast';
 
 export default function NewAudit() {
   const navigate = useNavigate();
@@ -23,13 +24,23 @@ export default function NewAudit() {
   const [isDragging, setIsDragging] = useState(false);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
+  const [toasts, setToasts] = useState<{id: string, message: string, type: ToastType}[]>([]);
+
+  const addToast = (message: string, type: ToastType = 'info') => {
+    const id = Math.random().toString(36).substring(7);
+    setToasts(prev => [...prev, { id, message, type }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   const handleFile = async (file: File) => {
     if (file && file.name.endsWith('.csv')) {
       setFile(file);
       await uploadToBackend(file);
     } else {
-      alert("Please upload a valid CSV file");
+      addToast("Please upload a valid CSV file", 'error');
     }
   };
 
@@ -69,7 +80,7 @@ export default function NewAudit() {
       }
     } catch (error) {
       console.error(error);
-      alert("Failed to parse CSV via backend.");
+      addToast("Failed to parse CSV via backend.", 'error');
     } finally {
       setIsUploading(false);
     }
@@ -124,7 +135,7 @@ export default function NewAudit() {
       }
     } catch (error) {
        console.error("Audit run failed:", error);
-       alert("Error running audit. Check console.");
+       addToast("Error running audit. Check console.", 'error');
     } finally {
        setIsRunning(false);
     }
@@ -136,10 +147,10 @@ export default function NewAudit() {
     <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
       <header className="flex justify-between items-end">
         <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-400 to-indigo-400">
+          <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-primary-400 to-indigo-400 tracking-tight">
             New Fairness Audit
           </h1>
-          <p className="text-slate-400 mt-2">Upload your dataset to begin diagnosing hidden bias and subgroup disparities.</p>
+          <p className="text-slate-400 mt-2 font-medium">Upload your dataset to begin diagnosing hidden bias and subgroup disparities.</p>
         </div>
         {columns.length > 0 && (
           <button onClick={() => {
@@ -340,6 +351,7 @@ export default function NewAudit() {
           {/* Action Footer */}
           <div className="flex flex-col items-center gap-4 pt-8">
             <button 
+              id="analyze-button"
               onClick={startAudit}
               disabled={!isConfigComplete || isRunning || isConfigSaving}
               className={`group relative overflow-hidden px-12 py-5 rounded-2xl font-bold text-xl transition-all duration-300 ${
@@ -374,6 +386,7 @@ export default function NewAudit() {
           </div>
         </div>
       )}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

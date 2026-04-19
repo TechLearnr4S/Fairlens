@@ -50,9 +50,17 @@ export default function FairnessCopilot() {
         method: 'POST'
       });
       const data = await res.json();
+      
+      if (!res.ok) {
+        console.error("Copilot backend error:", data);
+        alert(`Copilot Error: ${data.detail || data.error || 'Failed to analyze'}`);
+        return;
+      }
+      
       setCopilotSummary(data);
     } catch (err) {
       console.error("Copilot failed:", err);
+      alert("Network error: failed to reach copilot backend.");
     } finally {
       setIsCopilotRunning(false);
       setActiveStep(3);
@@ -178,6 +186,24 @@ function AgentResultCard({ title, agent, content, delay }: { title: string, agen
     return () => clearTimeout(timer);
   }, [delay]);
 
+  const renderContent = (str: string) => {
+    if (str.startsWith('[') && str.endsWith(']')) {
+      try {
+        const arr = JSON.parse(str);
+        if (Array.isArray(arr)) {
+          return (
+            <ul className="list-disc pl-4 space-y-1">
+              {arr.map((item: string, i: number) => <li key={i}>{item}</li>)}
+            </ul>
+          );
+        }
+      } catch (e) {
+        // Fallback to string if parsing fails
+      }
+    }
+    return str;
+  };
+
   return (
     <div className={`glass-panel overflow-hidden transition-all duration-700 transform ${
       visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
@@ -193,7 +219,7 @@ function AgentResultCard({ title, agent, content, delay }: { title: string, agen
       </div>
       <div className="p-6">
         <div className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap font-medium">
-          {content}
+          {renderContent(content)}
         </div>
         <div className="mt-6 pt-4 border-t border-slate-800/50 flex items-center justify-between">
           <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-1">

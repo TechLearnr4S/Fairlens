@@ -20,7 +20,7 @@ import {
   Area
 } from 'recharts';
 import { Play, RotateCcw, ShieldAlert, Zap, TrendingUp, TrendingDown, Info, AlertCircle, ArrowRight } from 'lucide-react';
-import { ToastContainer, ToastType } from '../ui/Toast';
+import { ToastContainer, type ToastType } from '../ui/Toast';
 
 export default function BiasSandbox() {
   const { jobId, simulation, setSimulation, isSimulating, setIsSimulating, columns, targetColumn, protectedAttributes } = useAuditStore();

@@ -3,7 +3,7 @@ import { UploadCloud, CheckCircle, ArrowRight, Loader, Table, Shield, Target, Al
 import { useNavigate } from 'react-router-dom';
 import { useAuditStore } from '../store/auditStore';
 import { auth } from '../firebase';
-import { ToastContainer, ToastType } from '../components/ui/Toast';
+import { ToastContainer, type ToastType } from '../components/ui/Toast';
 
 export default function NewAudit() {
   const navigate = useNavigate();

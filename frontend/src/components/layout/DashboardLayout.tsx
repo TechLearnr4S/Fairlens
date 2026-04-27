@@ -34,14 +34,14 @@ export function DashboardLayout() {
             <UploadCloud size={18} />
             New Audit
           </Link>
-          <a href="#" className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-500 cursor-not-allowed">
+          <Link to="/teams" className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800/50 text-slate-400 hover:text-slate-200 transition-colors">
             <Users size={18} />
-            Teams (Soon)
-          </a>
-          <a href="#" className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-500 cursor-not-allowed">
+            Teams
+          </Link>
+          <Link to="/passports" className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800/50 text-slate-400 hover:text-slate-200 transition-colors">
             <FileLock size={18} />
-            Passports (Soon)
-          </a>
+            Passports
+          </Link>
         </nav>
 
         <div className="p-4 border-t border-slate-700/50">

@@ -23,7 +23,7 @@ from fairness_engine import compute_disparities
 from proxy_detector import identify_proxies
 from llm_explainer import generate_fairness_explanation, generate_proxy_explanation
 from governance import generate_audit_receipt, generate_fairness_passport, build_fairness_passport, generate_narrative_summary
-from fairness_evaluator import ModelFairnessEvaluator
+from fairness_evaluator import StatisticallyRigorousEvaluator
 from bias_simulator import simulate_mitigation_enhanced, optimize_fairness, generate_recommendation
 from correlation_engine import run_correlation_analysis, compute_proxy_risk
 from firebase_client import (
@@ -377,7 +377,6 @@ async def get_audit_summary(job_id: str):
     
     return {"story": story}
 
-from fairness_evaluator import StatisticallyRigorousEvaluator
 from logger_db import log_event, verify_audit, tamper_audit_log, get_audit_replay, get_decision_history
 from compliance_report import generate_compliance_report
 

@@ -13,6 +13,8 @@ import ForgotPassword from './pages/public/ForgotPassword';
 
 import Dashboard from './pages/private/Dashboard';
 import NewAudit from './pages/NewAudit';
+import Teams from './pages/private/Teams';
+import Passports from './pages/private/Passports';
 
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
   constructor(props: any) {
@@ -58,6 +60,8 @@ function App() {
               <Route element={<DashboardLayout />}>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/new-audit" element={<NewAudit />} />
+                <Route path="/teams" element={<Teams />} />
+                <Route path="/passports" element={<Passports />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

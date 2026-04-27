@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 from fairness_engine import compute_disparities
 from proxy_detector import identify_proxies
 from llm_explainer import generate_fairness_explanation, generate_proxy_explanation
-from governance import generate_audit_receipt, generate_fairness_passport, build_fairness_passport
-from bias_simulator import simulate_mitigation_enhanced
+from governance import generate_audit_receipt, generate_fairness_passport, build_fairness_passport, generate_narrative_summary
+from fairness_evaluator import StatisticallyRigorousEvaluator
+from bias_simulator import simulate_mitigation_enhanced, optimize_fairness, generate_recommendation
 from correlation_engine import run_correlation_analysis, compute_proxy_risk
 from firebase_client import (
     download_dataset_as_dataframe,
@@ -37,6 +38,7 @@ from audit_log import append_audit_log, get_audit_chain, verify_chain, run_verif
 from signing import get_public_key_pem, get_public_key_hex
 from cache import cache_get, cache_set, cache_stats
 from validation import validate_dataset, validate_audit_config, sanitize_string
+from policy_engine import PolicyEngine, PolicyViolationException
 
 # In-memory storage for MVP (In production, load from Cloud Storage/Firestore)
 # Format: { job_id: {"df": DataFrame, "results": dict, "config": dict} }
@@ -51,6 +53,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(PolicyViolationException)
+async def policy_exception_handler(request, exc: PolicyViolationException):
+    return JSONResponse(
+        status_code=403,
+        content={"allowed": False, "reason": exc.message},
+    )
+
+@app.get("/governance/public-key")
+async def get_governance_public_key():
+    """
+    Expose the Ed25519 public key for independent audit verification.
+    """
+    return {
+        "public_key_pem": get_public_key_pem(),
+        "public_key_hex": get_public_key_hex(),
+        "algorithm": "Ed25519"
+    }
+
+from fastapi.responses import JSONResponse
 
 # ── Rate Limiting ──────────────────────────────────────────────────────────
 RATE_LIMIT_STORE = {} # {client_id: [timestamps]}
@@ -117,6 +139,13 @@ async def upload_dataset(file: UploadFile = File(...)):
         else:
             column_types[col] = "categorical"
 
+    # Log event
+    log_event(job_id, "DATASET_UPLOAD", {
+        "filename": file.filename,
+        "rows": len(df),
+        "columns": list(df.columns)
+    })
+    
     return {
         "job_id": job_id,
         "columns": columns,
@@ -132,6 +161,14 @@ class AuditRunRequest(BaseModel):
 class SimulationRequest(BaseModel):
     method: str
     params: dict = {}
+
+class ModelEvaluationRequest(BaseModel):
+    y_true_col: str
+    y_pred_col: str
+    protected_attribute_cols: list[str]
+    probs_col: Optional[str] = None
+    policy: Optional[dict] = None
+    use_case: Optional[str] = "general"
 
 @app.post("/audits/{job_id}/run")
 async def run_audit(job_id: str, payload: AuditRunRequest):
@@ -185,6 +222,12 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
 
         # Audit log
         try:
+            log_event(job_id, "FAIRNESS_RUN", {
+                "target_column":         payload.target_column,
+                "protected_attributes":  payload.protected_attributes,
+                "attributes_scanned":    len(disparities),
+                "proxies_found":         len(proxies),
+            })
             append_audit_log(
                 audit_id=job_id, action="FAIRNESS_RUN",
                 metadata={
@@ -229,6 +272,7 @@ async def explain_audit(job_id: str):
 
 @app.post("/audits/{job_id}/simulate")
 async def simulate_mitigation(job_id: str, payload: SimulationRequest):
+    PolicyEngine(LOCAL_DATASTORE).enforce(job_id, "RUN_SIMULATION")
     if job_id not in LOCAL_DATASTORE or "target" not in LOCAL_DATASTORE[job_id]["config"]:
         raise HTTPException(status_code=404, detail="Audit config not found. Run the audit first.")
         
@@ -251,6 +295,13 @@ async def simulate_mitigation(job_id: str, payload: SimulationRequest):
     # Hash-chained log: simulation applied
     try:
         delta = simulation.get("delta", {})
+        # Log event
+        log_event(job_id, "SIMULATION_APPLIED", {
+            "method": payload.method,
+            "params": payload.params,
+            "bias_reduction_pct": delta.get("disparity_reduction_pct", 0),
+            "accuracy_change_pct": delta.get("accuracy_change_pct", 0),
+        })
         append_audit_log(
             audit_id=job_id,
             action="SIMULATION_APPLIED",
@@ -266,9 +317,192 @@ async def simulate_mitigation(job_id: str, payload: SimulationRequest):
 
     return simulation
 
+@app.post("/audits/{job_id}/optimize")
+async def optimize_audit(job_id: str):
+    if job_id not in LOCAL_DATASTORE or "target" not in LOCAL_DATASTORE[job_id]["config"]:
+        raise HTTPException(status_code=404, detail="Audit config not found. Run the audit first.")
+        
+    data = LOCAL_DATASTORE[job_id]
+    result = optimize_fairness(
+        job_id,
+        data["df"], 
+        data["config"]["target"], 
+        data["config"]["protected"]
+    )
+    
+    if result.get("status") == "failed":
+        raise HTTPException(status_code=500, detail=result.get("error"))
+
+    # Log the optimization event
+    try:
+        append_audit_log(
+            audit_id=job_id,
+            action="SIMULATION_OPTIMIZED",
+            metadata={
+                "optimal_threshold": result.get("optimal_threshold"),
+                "bias_reduction_pct": result.get("metrics", {}).get("disparity"),
+            },
+        )
+    except Exception:
+        pass
+        
+    return result
+
+@app.get("/audits/{job_id}/recommendation")
+async def get_recommendation(job_id: str):
+    if job_id not in LOCAL_DATASTORE:
+        raise HTTPException(status_code=404, detail="Audit not found.")
+        
+    data = LOCAL_DATASTORE[job_id]
+    recommendation = generate_recommendation(
+        job_id,
+        data["df"],
+        data["config"]["target"],
+        data["config"]["protected"],
+        data["results"]
+    )
+    
+    if recommendation.get("status") == "failed":
+        raise HTTPException(status_code=500, detail=recommendation.get("error"))
+        
+    return recommendation
+
+@app.get("/audits/{job_id}/summary")
+async def get_audit_summary(job_id: str):
+    if job_id not in LOCAL_DATASTORE:
+        raise HTTPException(status_code=404, detail="Audit not found.")
+        
+    data = LOCAL_DATASTORE[job_id]
+    story = generate_narrative_summary(data)
+    
+    return {"story": story}
+
+from logger_db import log_event, verify_audit, tamper_audit_log, get_audit_replay, get_decision_history
+from compliance_report import generate_compliance_report
+
+@app.get("/audits/{job_id}/compliance-report")
+async def get_compliance_report(job_id: str):
+    """
+    Generates a structured, compliance-ready audit report.
+    """
+    if job_id not in LOCAL_DATASTORE:
+        raise HTTPException(status_code=404, detail="Audit job not found.")
+    return generate_compliance_report(job_id, LOCAL_DATASTORE)
+
+@app.get("/audits/{job_id}/decision-history")
+async def decision_history(job_id: str):
+    """
+    Returns the human-readable decision history reconstructed from the audit ledger.
+    Shows inputs, outputs, and reasoning for each step in the timeline.
+    """
+    return get_decision_history(job_id)
+
+@app.get("/audits/{job_id}/replay")
+async def replay_audit(job_id: str):
+    """
+    Reconstruct the audit timeline for replay.
+    """
+    return get_audit_replay(job_id)
+
+@app.get("/audits/{job_id}/export/json")
+async def export_audit_json(job_id: str):
+    """
+    Export the full audit trail as a signed JSON proof.
+    """
+    return get_audit_replay(job_id)
+
+@app.get("/audit-proof/{job_id}")
+async def get_external_audit_proof(job_id: str):
+    """
+    Provide independent external verification support for the audit ledger.
+    Includes the full audit trail, cryptographic keys, and verification instructions.
+    """
+    replay_data = get_audit_replay(job_id)
+    
+    instructions = [
+        "To independently verify this audit proof:",
+        "1. Extract the 'timeline' array which contains the chronological audit logs.",
+        "2. For each log entry, reconstruct the hash payload string exactly as follows (without spaces between fields):",
+        "   payload = prev_hash + action + actor_json_sorted + context_json_sorted + timestamp + metadata_json_sorted",
+        "   Note: JSON objects must be stringified with keys sorted alphabetically and no spaces.",
+        "3. Compute the SHA-256 hash of the payload string.",
+        "4. Verify that the computed hash exactly matches the 'hash' field of the log entry.",
+        "5. Verify that the 'prev_hash' field exactly matches the 'hash' field of the preceding log entry (or 'GENESIS' for the first entry).",
+        "6. Verify the 'signature' field using the provided 'public_key_pem', the Ed25519 signature algorithm, and the stored 'hash'."
+    ]
+    
+    return {
+        "audit_id": job_id,
+        "is_intact": replay_data["is_intact"],
+        "verification_summary": replay_data["verification_summary"],
+        "exported_at": replay_data["exported_at"],
+        "public_key": {
+            "algorithm": "Ed25519",
+            "pem": get_public_key_pem(),
+            "hex": get_public_key_hex()
+        },
+        "verification_instructions": instructions,
+        "timeline": replay_data["timeline"]
+    }
+
+@app.post("/audits/{job_id}/tamper")
+async def simulate_tampering(job_id: str):
+    """
+    Simulate tampering by modifying a log record in the database.
+    """
+    success = tamper_audit_log(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="No logs found to tamper with.")
+    return {"status": "success", "message": "Log entry modified. Hash chain is now broken."}
+
+@app.get("/audits/{job_id}/verify")
+async def verify_audit_trail(job_id: str):
+    """
+    Cryptographically verify the integrity of the audit trail.
+    """
+    return verify_audit(job_id)
+
+@app.post("/audits/{job_id}/model-evaluation")
+async def evaluate_model(job_id: str, payload: ModelEvaluationRequest):
+    if job_id not in LOCAL_DATASTORE:
+        raise HTTPException(status_code=404, detail="Audit job not found.")
+        
+    df = LOCAL_DATASTORE[job_id]["df"]
+    
+    try:
+        evaluator = StatisticallyRigorousEvaluator(
+            df=df,
+            y_true_col=payload.y_true_col,
+            y_pred_col=payload.y_pred_col,
+            protected_attrs=payload.protected_attribute_cols,
+            probs_col=payload.probs_col,
+            policy=payload.policy
+        )
+        
+        results = evaluator.evaluate()
+        
+        # Log event
+        log_event(job_id, "MODEL_EVALUATION", {
+            "y_true": payload.y_true_col,
+            "y_pred": payload.y_pred_col,
+            "ethical_score": results["overall"]["ethical_score"]
+        })
+        
+        # Persistence for governance
+        LOCAL_DATASTORE[job_id]["results"]["model_evaluation"] = results
+        
+        return results
+        
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error("MODEL_EVAL_RIGOR_FATAL | %s", e)
+        raise HTTPException(status_code=500, detail="Internal Rigorous AI Engine Error")
+
 @app.get("/audits/{job_id}/passport")
 async def get_passport(job_id: str):
-    if job_id not in LOCAL_DATASTORE or not LOCAL_DATASTORE[job_id]["results"]:
+    PolicyEngine(LOCAL_DATASTORE).enforce(job_id, "GENERATE_PASSPORT")
+    if job_id not in LOCAL_DATASTORE:
         raise HTTPException(status_code=404, detail="Audit results not found. Run the audit first.")
 
     data = LOCAL_DATASTORE[job_id]

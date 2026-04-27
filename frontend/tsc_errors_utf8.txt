@@ -1,0 +1,23 @@
+﻿src/components/audit/AiInsightCard.tsx(1,1): error TS6133: 'React' is declared but its value is never read.
+src/components/audit/AuditIntegrity.tsx(7,3): error TS6133: 'Download' is declared but its value is never read.
+src/components/audit/CorrelationHeatmap.tsx(1,17): error TS6133: 'useMemo' is declared but its value is never read.
+src/components/audit/CorrelationHeatmap.tsx(2,10): error TS6133: 'Info' is declared but its value is never read.
+src/components/audit/FairnessCopilot.tsx(1,8): error TS6133: 'React' is declared but its value is never read.
+src/components/audit/FairnessCopilot.tsx(10,3): error TS6133: 'AlertTriangle' is declared but its value is never read.
+src/components/audit/FairnessPassport.tsx(84,5): error TS2741: Property 'text' is missing in type '{ bg: string; icon: JSX.Element; }' but required in type '{ bg: string; text: string; icon: ReactNode; }'.
+src/components/audit/FairnessPassport.tsx(85,5): error TS2741: Property 'text' is missing in type '{ bg: string; icon: JSX.Element; }' but required in type '{ bg: string; text: string; icon: ReactNode; }'.
+src/components/audit/FairnessPassport.tsx(86,5): error TS2741: Property 'text' is missing in type '{ bg: string; icon: JSX.Element; }' but required in type '{ bg: string; text: string; icon: ReactNode; }'.
+src/components/audit/FairnessPassport.tsx(87,5): error TS2741: Property 'text' is missing in type '{ bg: string; icon: JSX.Element; }' but required in type '{ bg: string; text: string; icon: ReactNode; }'.
+src/components/audit/ProxyAiInsight.tsx(1,1): error TS6133: 'React' is declared but its value is never read.
+src/components/audit/ProxyBiasHunter.tsx(1,1): error TS6133: 'React' is declared but its value is never read.
+src/components/audit/ProxyRiskBarChart.tsx(88,17): error TS2322: Type '(val: number) => string' is not assignable to type 'LabelFormatter'.
+  Types of parameters 'val' and 'label' are incompatible.
+    Type 'RenderableText' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+src/components/ui/Skeleton.tsx(36,9): error TS2322: Type '{ key: number; className: string; style: { height: string; }; }' is not assignable to type 'IntrinsicAttributes & SkeletonProps'.
+  Property 'style' does not exist on type 'IntrinsicAttributes & SkeletonProps'.
+src/pages/private/Dashboard.tsx(1,1): error TS6133: 'useState' is declared but its value is never read.
+src/pages/private/Dashboard.tsx(3,78): error TS6133: 'Download' is declared but its value is never read.
+src/pages/private/Dashboard.tsx(14,1): error TS6192: All imports in import declaration are unused.
+src/pages/private/Dashboard.tsx(18,45): error TS6133: 'protectedAttributes' is declared but its value is never read.
+src/pages/private/Dashboard.tsx(18,66): error TS6133: 'proxies' is declared but its value is never read.

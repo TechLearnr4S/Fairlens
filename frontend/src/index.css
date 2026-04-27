@@ -36,4 +36,16 @@
   .btn-secondary {
     @apply px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg font-medium transition-all duration-200 border border-slate-600 active:scale-95;
   }
+
+  @keyframes adaptive-glow {
+    0%, 100% { box-shadow: 0 0 5px rgba(99, 102, 241, 0.2); }
+    50% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.6), 0 0 40px rgba(99, 102, 241, 0.2); }
+  }
+
+  .adaptive-highlight {
+    animation: adaptive-glow 2s infinite ease-in-out;
+    border-color: rgba(99, 102, 241, 0.8) !important;
+    position: relative;
+    z-index: 50;
+  }
 }

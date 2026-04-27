@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuditStore } from '../../store/auditStore';
 import { 
   BarChart, 
@@ -9,14 +9,36 @@ import {
   Tooltip, 
   ResponsiveContainer, 
   Cell,
-  Legend
+  Legend,
+  LineChart,
+  Line,
+  Scatter,
+  ReferenceDot,
+  ComposedChart,
+  Label,
+  AreaChart,
+  Area
 } from 'recharts';
-import { Play, RotateCcw, ShieldAlert, Zap, TrendingUp, Info } from 'lucide-react';
+import { Play, RotateCcw, ShieldAlert, Zap, TrendingUp, TrendingDown, Info, AlertCircle, ArrowRight } from 'lucide-react';
+import { ToastContainer, type ToastType } from '../ui/Toast';
 
 export default function BiasSandbox() {
   const { jobId, simulation, setSimulation, isSimulating, setIsSimulating, columns, targetColumn, protectedAttributes } = useAuditStore();
   const [method, setMethod] = useState<'threshold_adjustment' | 'feature_removal'>('threshold_adjustment');
   const [threshold, setThreshold] = useState(0.5);
+  const [isDebouncing, setIsDebouncing] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [tradeoffCurve, setTradeoffCurve] = useState<any[]>([]);
+  const [recommendation, setRecommendation] = useState<any>(null);
+  const [toasts, setToasts] = useState<{id: string, message: string, type: ToastType}[]>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const addToast = (message: string, type: ToastType) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, message, type }]);
+  };
+
+  const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
   
   // Filter out target and protected attributes from removable features
   const removableFeatures = React.useMemo(() => 
@@ -33,14 +55,24 @@ export default function BiasSandbox() {
     }
   }, [removableFeatures, feature]);
 
-  const runSimulation = async () => {
+  const runSimulation = useCallback(async () => {
     if (!jobId) return;
+    
+    // Abort previous request if exists
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new controller for the current request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     
     setIsSimulating(true);
     try {
       const res = await fetch(`http://localhost:8000/audits/${jobId}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           method,
           params: method === 'threshold_adjustment' 
@@ -53,21 +85,87 @@ export default function BiasSandbox() {
       try {
         data = await res.json();
       } catch (e) {
+        if (controller.signal.aborted) return;
         throw new Error("Invalid response from simulation engine");
       }
 
       if (res.ok) {
+        if (controller.signal.aborted) return;
         setSimulation(data);
       } else {
-        alert(data.detail || "Simulation failed");
+        if (controller.signal.aborted) return;
+        addToast(data.detail || "Simulation failed", 'error');
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
+      console.error(e);
+      addToast("Failed to connect to simulation engine.", 'error');
+    } finally {
+      // Only release simulation lock if this was the latest request
+      if (abortControllerRef.current === controller) {
+        setIsSimulating(false);
+      }
+    }
+  }, [jobId, method, threshold, feature, removableFeatures, setIsSimulating, setSimulation]);
+
+  const handleOptimize = async () => {
+    if (!jobId) return;
+    setIsOptimizing(true);
+    try {
+      const res = await fetch(`http://localhost:8000/audits/${jobId}/optimize`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setThreshold(data.optimal_threshold);
+        setTradeoffCurve(data.tradeoff_curve);
+        addToast(`Optimized threshold found: ${data.optimal_threshold}`, 'success');
+      } else {
+        addToast(data.detail || "Optimization failed", 'error');
       }
     } catch (e) {
-      console.error(e);
-      alert("Failed to connect to simulation engine.");
+      addToast("Failed to connect to optimization engine", 'error');
     } finally {
-      setIsSimulating(false);
+      setIsOptimizing(false);
+      fetchRecommendation();
     }
   };
+
+  const fetchRecommendation = useCallback(async () => {
+    if (!jobId) return;
+    try {
+      const res = await fetch(`http://localhost:8000/audits/${jobId}/recommendation`);
+      const data = await res.json();
+      if (res.ok) setRecommendation(data);
+    } catch (e) {
+      console.error("Failed to fetch recommendation", e);
+    }
+  }, [jobId]);
+
+  useEffect(() => {
+    if (jobId && simulation) {
+      fetchRecommendation();
+    }
+  }, [jobId, simulation, fetchRecommendation]);
+
+  // Debounced simulation trigger
+  useEffect(() => {
+    if (!jobId) return;
+
+    setIsDebouncing(true);
+    const timer = setTimeout(() => {
+      setIsDebouncing(false);
+      runSimulation();
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      setIsDebouncing(false);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [method, threshold, feature, runSimulation, jobId]);
 
   const chartData = simulation ? [
     { name: 'Accuracy', before: simulation.before.accuracy, after: simulation.after.accuracy },
@@ -91,7 +189,19 @@ export default function BiasSandbox() {
           </h2>
           <p className="text-slate-400 text-sm mt-1">Simulate fairness mitigation strategies and audit trade-offs</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
+            {isDebouncing && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full">
+                <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Debouncing...</span>
+              </div>
+            )}
+            {!isDebouncing && !isSimulating && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Live Sync</span>
+              </div>
+            )}
             {simulation && (
                <button 
                  onClick={() => setSimulation(null)}
@@ -114,8 +224,9 @@ export default function BiasSandbox() {
             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mitigation Method</label>
             <select
               value={method}
+              disabled={isSimulating}
               onChange={(e) => setMethod(e.target.value as any)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none cursor-pointer"
+              className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none cursor-pointer ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <option value="threshold_adjustment">Threshold Adjustment</option>
               <option value="feature_removal">Feature Removal</option>
@@ -123,24 +234,80 @@ export default function BiasSandbox() {
           </div>
 
           <div className={`space-y-4 transition-all duration-300 ${method !== 'threshold_adjustment' ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
-            <div className="flex justify-between">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Probability Threshold</label>
-              <span className="text-indigo-400 font-mono font-bold">{threshold.toFixed(2)}</span>
+            <div className="flex justify-between items-center">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Threshold: <span className="text-indigo-400">{threshold.toFixed(2)}</span></label>
+              <button 
+                onClick={handleOptimize}
+                disabled={isOptimizing || isSimulating}
+                className={`text-[10px] font-black text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-500/5 border border-indigo-500/10 ${isOptimizing ? 'animate-pulse' : ''}`}
+              >
+                {isOptimizing ? <RotateCcw size={10} className="animate-spin" /> : <Zap size={10} className="fill-indigo-400/20" />}
+                Auto Optimize
+              </button>
+            </div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-bold text-slate-600 uppercase">Live Update</span>
+                <div className={`w-1 h-1 rounded-full ${isDebouncing ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+              </div>
+              {threshold === 0.5 && !isSimulating && (
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter">Default Baseline</span>
+              )}
             </div>
             <input
-              type="range" min="0" max="1" step="0.05"
+              type="range" min="0.1" max="0.9" step="0.05"
               value={threshold}
+              disabled={isSimulating || isOptimizing}
               onChange={(e) => setThreshold(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              className={`w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500 ${isSimulating || isOptimizing ? 'opacity-50 cursor-not-allowed' : ''}`}
             />
+            
+            {/* Mini Sensitivity Graph */}
+            {tradeoffCurve.length > 0 && method === 'threshold_adjustment' && (
+              <div className="h-16 w-full mt-4 bg-slate-900/40 rounded-lg overflow-hidden border border-slate-700/30 group relative">
+                <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-center items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">Bias Sensitivity</span>
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={tradeoffCurve}>
+                    <Area 
+                      type="monotone" 
+                      dataKey="disparity" 
+                      stroke="#6366f1" 
+                      fill="url(#colorDisp)" 
+                      strokeWidth={2} 
+                      isAnimationActive={false} 
+                    />
+                    <defs>
+                      <linearGradient id="colorDisp" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    {/* Highlight Current Threshold */}
+                    {tradeoffCurve.find(p => Math.abs(p.threshold - threshold) < 0.01) && (
+                       <ReferenceDot 
+                         x={tradeoffCurve.indexOf(tradeoffCurve.find(p => Math.abs(p.threshold - threshold) < 0.01))} 
+                         y={tradeoffCurve.find(p => Math.abs(p.threshold - threshold) < 0.01).disparity} 
+                         r={3} 
+                         fill="#f59e0b" 
+                         stroke="#fff" 
+                         strokeWidth={1}
+                       />
+                    )}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
 
           <div className={`space-y-2 transition-all duration-300 ${method !== 'feature_removal' ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Feature to Remove</label>
             <select
               value={feature}
+              disabled={isSimulating}
               onChange={(e) => setFeature(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none"
+              className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {removableFeatures.length > 0 ? (
                 removableFeatures.map(col => (
@@ -169,14 +336,86 @@ export default function BiasSandbox() {
             ) : (
               <>
                 <Play size={16} fill="currentColor" />
-                <span>Run Simulation</span>
+                <span>Manual Simulation Sync</span>
               </>
             )}
           </button>
         </div>
 
         {/* Dashboard Panel */}
-        <div className="xl:col-span-3 bg-slate-800/30 rounded-2xl border border-slate-800 p-8 min-h-[500px] flex flex-col relative overflow-hidden">
+        <div id="simulation-sandbox" className="xl:col-span-3 bg-slate-800/30 rounded-2xl border border-slate-800 p-8 min-h-[500px] flex flex-col relative overflow-hidden">
+          {/* Decision Intelligence Engine */}
+          {recommendation && recommendation.recommendations && simulation && (
+            <div className="mb-10 space-y-6 animate-in fade-in slide-in-from-top-4 duration-700">
+               <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Zap className="text-indigo-400" size={16} fill="currentColor" />
+                    <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Decision Intelligence Engine</h3>
+                  </div>
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
+                    {recommendation.recommendations.length} Strategy Scenarios Evaluated
+                  </span>
+               </div>
+               
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {recommendation.recommendations.map((rec: any, i: number) => {
+                    const isRecommended = rec.label === recommendation.recommended;
+                    return (
+                      <div 
+                        key={i} 
+                        className={`relative p-8 rounded-[2rem] border transition-all duration-500 group ${
+                          isRecommended 
+                            ? 'bg-gradient-to-br from-indigo-600/20 to-violet-600/20 border-indigo-500/50 shadow-2xl shadow-indigo-500/10' 
+                            : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        {isRecommended && (
+                          <div className="absolute -top-3 left-8 px-4 py-1.5 bg-indigo-500 text-[10px] font-black text-white uppercase tracking-widest rounded-full shadow-lg shadow-indigo-500/20">
+                            AI Recommended
+                          </div>
+                        )}
+                        <div className="space-y-6">
+                           <div>
+                             <p className={`text-[10px] font-black uppercase tracking-widest mb-2 ${isRecommended ? 'text-indigo-400' : 'text-slate-500'}`}>
+                               {rec.label}
+                             </p>
+                             <h4 className="text-lg font-black text-white leading-tight">
+                               {rec.action}
+                             </h4>
+                           </div>
+                           
+                           <div className="space-y-4">
+                              <p className="text-xs text-slate-400 font-medium leading-relaxed">
+                                {rec.impact}
+                              </p>
+                              <div className="flex items-center justify-between pt-6 mt-6 border-t border-white/5">
+                                 <div className="flex flex-col">
+                                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Confidence</span>
+                                   <span className="text-sm font-mono font-black text-emerald-400">{(rec.confidence * 100).toFixed(0)}%</span>
+                                 </div>
+                                 <button 
+                                   onClick={() => {
+                                     setThreshold(rec.threshold);
+                                     addToast(`Applying ${rec.label} strategy...`, 'info');
+                                   }}
+                                   className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                                     isRecommended 
+                                       ? 'bg-indigo-500 hover:bg-indigo-400 text-white shadow-xl shadow-indigo-500/20 active:scale-95' 
+                                       : 'bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95'
+                                   }`}
+                                 >
+                                   Apply
+                                 </button>
+                              </div>
+                           </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+               </div>
+            </div>
+          )}
+
           {!simulation && !isSimulating && (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-600 space-y-6 text-center max-w-sm mx-auto">
               <div className="w-24 h-24 rounded-full bg-slate-800/50 flex items-center justify-center text-5xl opacity-20 border-2 border-slate-700">📊</div>
@@ -187,7 +426,7 @@ export default function BiasSandbox() {
             </div>
           )}
 
-          {isSimulating && (
+          {!simulation && isSimulating && (
             <div className="flex-1 flex flex-col items-center justify-center space-y-4">
               <div className="relative">
                 <div className="w-20 h-20 border-4 border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin" />
@@ -199,16 +438,44 @@ export default function BiasSandbox() {
             </div>
           )}
 
-          {simulation && !isSimulating && (
-            <div className="flex-1 space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          {simulation && (
+            <div className={`flex-1 space-y-10 transition-all duration-700 ease-out ${isSimulating ? 'opacity-40 grayscale-[0.8] blur-[2px] scale-[0.995]' : 'opacity-100 scale-100'}`}>
+              {/* Updating Overlay */}
+              {isSimulating && (
+                <div className="absolute top-6 right-6 z-30 flex items-center gap-3 bg-slate-900/90 backdrop-blur-xl border border-indigo-500/40 px-5 py-2.5 rounded-2xl shadow-2xl animate-in fade-in zoom-in slide-in-from-top-2 duration-300 ring-1 ring-white/10">
+                  <div className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                  </div>
+                  <span className="text-[10px] font-black text-white uppercase tracking-widest">Live Updating...</span>
+                </div>
+              )}
               {/* Header Info */}
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
                 <div className="space-y-1">
-                   <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">Mitigation Strategy Impact</h3>
-                   <div className="flex items-center gap-3">
-                      <span className="text-2xl font-black text-white">{disparityReductionPct.toFixed(1)}% Bias Reduction</span>
-                      <TrendingUp className="text-emerald-400" size={20} />
-                   </div>
+                    <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">Mitigation Strategy Impact</h3>
+                    <div className="flex items-center gap-3">
+                       <span className="text-2xl font-black text-white">{disparityReductionPct.toFixed(1)}% Bias Reduction</span>
+                       {disparityReductionPct > 0 ? (
+                         <TrendingDown className="text-emerald-400" size={20} />
+                       ) : (
+                         <TrendingUp className="text-rose-400" size={20} />
+                       )}
+                    </div>
+                    <div className="flex gap-2 mt-1">
+                       {disparityReductionPct > 0 && (
+                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-[9px] font-black text-emerald-400 uppercase tracking-wider">
+                           <Zap size={10} />
+                           Bias decreasing
+                         </div>
+                       )}
+                       {accuracyChangePct < 0 && (
+                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[9px] font-black text-amber-400 uppercase tracking-wider">
+                           <AlertCircle size={10} />
+                           Trade-off increasing
+                         </div>
+                       )}
+                    </div>
                 </div>
                 
                 <div className="flex items-center gap-4">
@@ -245,6 +512,7 @@ export default function BiasSandbox() {
                       tickLine={false} 
                       axisLine={false} 
                       tickFormatter={(value) => `${(value * 100).toFixed(0)}%`}
+                      domain={[0, 1]}
                     />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '16px', padding: '12px' }}
@@ -258,12 +526,12 @@ export default function BiasSandbox() {
                       iconType="circle" 
                       wrapperStyle={{ fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', paddingBottom: '30px' }} 
                     />
-                    <Bar dataKey="before" name="Baseline" radius={[4, 4, 0, 0]} barSize={40}>
+                    <Bar dataKey="before" name="Baseline" radius={[4, 4, 0, 0]} barSize={40} isAnimationActive={true} animationDuration={800} animationEasing="ease-in-out">
                       {(chartData || []).map((_entry: any, index: number) => (
                         <Cell key={`cell-before-${index}`} fill="#334155" />
                       ))}
                     </Bar>
-                    <Bar dataKey="after" name="Simulated" radius={[4, 4, 0, 0]} barSize={40}>
+                    <Bar dataKey="after" name="Simulated" radius={[4, 4, 0, 0]} barSize={40} isAnimationActive={true} animationDuration={800} animationEasing="ease-in-out">
                       {chartData.map((entry: any, index: number) => {
                         const isBetter = entry.name === 'Disparity Score' 
                           ? Number(entry.after) < Number(entry.before) 
@@ -281,18 +549,20 @@ export default function BiasSandbox() {
                 </ResponsiveContainer>
               </div>
 
-              {/* AI Insight Summary */}
-              <div className="p-5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl flex gap-4 items-start">
-                  <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
-                    <Info size={20} />
+              {/* Insight Section */}
+              <div className="bg-indigo-500/5 border border-indigo-500/10 p-5 rounded-2xl flex items-start gap-4 animate-in fade-in slide-in-from-left-2 duration-500">
+                  <div className="mt-1 bg-indigo-500/20 p-2 rounded-lg shrink-0">
+                    <Info className="text-indigo-400" size={18} />
                   </div>
-                  <div>
-                    <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-1">AI Mitigation Insight</h4>
-                    <p className="text-slate-300 text-sm leading-relaxed font-medium italic">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Intelligent Simulation Insight</p>
+                    <p className="text-sm text-slate-300 leading-relaxed font-medium italic">
                       "{simulation.insight}"
                     </p>
                   </div>
               </div>
+
+
 
               {/* Delta Cards */}
               <div className="grid grid-cols-2 gap-4">
@@ -315,10 +585,72 @@ export default function BiasSandbox() {
                       </div>
                   </div>
               </div>
+
+              {/* Tradeoff Curve Section */}
+              {tradeoffCurve.length > 0 && (
+                <div className="pt-8 border-t border-slate-800 space-y-6">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-2">Fairness vs Accuracy Pareto Curve</h3>
+                    <p className="text-[10px] text-slate-400 font-medium">Visualization of the mathematical trade-off across the threshold spectrum (0.1 - 0.9)</p>
+                  </div>
+                  
+                  <div className="h-[250px] w-full bg-slate-900/20 rounded-2xl p-4 border border-slate-800/50">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={tradeoffCurve} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" opacity={0.3} />
+                        <XAxis 
+                          dataKey="disparity" 
+                          name="Disparity" 
+                          stroke="#475569" 
+                          fontSize={10} 
+                          type="number" 
+                          domain={[0, 'dataMax + 0.05']}
+                          label={{ value: 'Disparity (Lower is Better)', position: 'insideBottom', offset: -10, fontSize: 9, fill: '#475569', fontWeight: 'bold' }}
+                        />
+                        <YAxis 
+                          dataKey="accuracy" 
+                          name="Accuracy" 
+                          stroke="#475569" 
+                          fontSize={10} 
+                          domain={['dataMin - 0.05', 1]}
+                          label={{ value: 'Accuracy', angle: -90, position: 'insideLeft', fontSize: 9, fill: '#475569', fontWeight: 'bold' }}
+                        />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px' }}
+                          formatter={(value: any, name: string) => [name === 'threshold' ? value.toFixed(2) : `${(value * 100).toFixed(1)}%`, name]}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="accuracy" 
+                          stroke="#6366f1" 
+                          strokeWidth={2} 
+                          dot={{ r: 2, fill: '#6366f1' }} 
+                          activeDot={{ r: 5 }}
+                          animationDuration={1500}
+                        />
+                        {/* Current Threshold Point */}
+                        {tradeoffCurve.find(p => Math.abs(p.threshold - threshold) < 0.01) && (
+                          <ReferenceDot 
+                            x={tradeoffCurve.find(p => Math.abs(p.threshold - threshold) < 0.01).disparity} 
+                            y={tradeoffCurve.find(p => Math.abs(p.threshold - threshold) < 0.01).accuracy} 
+                            r={6} 
+                            fill="#f59e0b" 
+                            stroke="#fff" 
+                            strokeWidth={2}
+                          >
+                            <Label value="Current" position="top" fill="#f59e0b" fontSize={9} fontWeight="bold" offset={10} />
+                          </ReferenceDot>
+                        )}
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

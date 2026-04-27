@@ -299,9 +299,10 @@ export default function FairnessPassport() {
         #fairness-passport-print { display: block; }
       `}</style>
 
-      <div id="fairness-passport-print" ref={printRef}
+      <div id="passport-section" ref={printRef}
         className="space-y-6 animate-in fade-in duration-500"
       >
+        <div id="fairness-passport-print"></div> {/* Keep ID for print isolation if needed, or just add it to parent */}
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="glass-panel p-8 bg-slate-900/40 border-slate-700/50 rounded-3xl">
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">

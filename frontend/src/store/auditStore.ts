@@ -49,6 +49,7 @@ interface AuditState {
   setCopilotSummary: (data: any | null) => void;
   setIsCopilotRunning: (status: boolean) => void;
   setCorrelationMatrix: (data: any | null) => void;
+  removeColumn: (col: string) => void;
   reset: () => void;
 }
 
@@ -104,6 +105,10 @@ export const useAuditStore = create<AuditState>((set) => ({
   setCopilotSummary: (data) => set({ copilotSummary: data }),
   setIsCopilotRunning: (status) => set({ isCopilotRunning: status }),
   setCorrelationMatrix: (data) => set({ correlationMatrix: data }),
+  removeColumn: (col) => set((state) => ({
+    columns: state.columns.filter(c => c !== col),
+    protectedAttributes: state.protectedAttributes.filter(attr => attr !== col)
+  })),
   reset: () => set({
     currentFile: null,
     jobId: null,

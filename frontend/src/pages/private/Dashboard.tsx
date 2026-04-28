@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShieldCheck, UploadCloud, AlertTriangle, Zap, Loader } from 'lucide-react';
+import { ShieldCheck, UploadCloud, AlertTriangle, Zap, Loader, Play, Wrench, CheckCircle2 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
+import { useAuditProgressStore } from '../../store/auditProgressStore';
 import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
 import { unwrapAuditBody } from '../../utils/auditEnvelope';
 import { auth } from '../../firebase';
@@ -81,7 +82,29 @@ function parseVerdict(raw: unknown): VerdictPayload | null {
   return { severity, legal_exposure, recommendation, confidence: c };
 }
 
+function StorySection({
+  index,
+  title,
+  children,
+  className = '',
+}: {
+  index: string;
+  title: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`space-y-4 border-t border-white/[0.08] pt-10 ${className}`}>
+      <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500">
+        {index} {title}
+      </p>
+      {children}
+    </section>
+  );
+}
+
 export default function Dashboard() {
+  const navigate = useNavigate();
   const {
     disparities,
     targetColumn,
@@ -95,6 +118,45 @@ export default function Dashboard() {
 
   const [summary, setSummary] = useState<string | null>(null);
   const [isVerdictLoading, setIsVerdictLoading] = useState(true);
+  const [applyFixLoading, setApplyFixLoading] = useState(false);
+  const [applyFixMessage, setApplyFixMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const advanceProgressTo = useAuditProgressStore((state) => state.advanceTo);
+
+  const openSandbox = useCallback(() => {
+    advanceProgressTo(4, jobId);
+    navigate('/sandbox');
+  }, [advanceProgressTo, jobId, navigate]);
+
+  const applyRecommendedFix = useCallback(async () => {
+    if (!jobId) return;
+    setApplyFixLoading(true);
+    setApplyFixMessage(null);
+    try {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/optimize`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { detail?: string })?.detail || 'Optimization failed.');
+      }
+      advanceProgressTo(4, jobId);
+      const threshold = (data as { optimal_threshold?: unknown })?.optimal_threshold;
+      setApplyFixMessage({
+        type: 'success',
+        text: threshold != null
+          ? `Recommended fix prepared: threshold ${threshold}. Open the sandbox to review the before/after impact.`
+          : 'Recommended fix prepared. Open the sandbox to review the before/after impact.',
+      });
+    } catch (err) {
+      if (isRequestTimeout(err)) return;
+      setApplyFixMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Could not prepare the recommended fix.',
+      });
+    } finally {
+      setApplyFixLoading(false);
+    }
+  }, [advanceProgressTo, jobId]);
 
   useEffect(() => {
     // Verdict is expected from the run-audit API response in the store.
@@ -159,20 +221,23 @@ export default function Dashboard() {
     const showVerdictEmpty = !isVerdictLoading && !displayVerdict;
 
     return (
-      <div className="space-y-8 animate-in fade-in duration-500 pb-16 max-w-7xl mx-auto">
-        <header className="flex items-center justify-between mb-10">
+      <div className="animate-in fade-in duration-500 pb-16 max-w-7xl mx-auto">
+        <header className="flex flex-col gap-5 mb-12 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-4xl font-black text-white tracking-tight">
-              Audit Insights
+            <p className="text-xs font-black uppercase tracking-[0.25em] text-[#8B5CF6]">
+              Detection to decision
+            </p>
+            <h1 className="mt-2 text-4xl font-black text-white tracking-tight">
+              Audit Command Center
             </h1>
-            <p className="text-slate-400 mt-2 font-medium">
-              Results for{" "}
-              <span className="text-primary-400 font-bold underline">
-                {currentFile?.name}
-              </span>{" "}
-              predicting{" "}
+            <p className="text-[#9CA3AF] mt-3 font-medium">
+              Results for{' '}
+              <span className="text-white font-bold">
+                {currentFile?.name ?? 'current dataset'}
+              </span>{' '}
+              predicting{' '}
               {targetColumn ? (
-                <span className="text-indigo-400 font-bold">{targetColumn}</span>
+                <span className="text-[#8B5CF6] font-bold">{targetColumn}</span>
               ) : (
                 <span className="text-slate-500 font-medium italic">no outcome column set</span>
               )}
@@ -181,151 +246,191 @@ export default function Dashboard() {
 
           <Link
             to="/new-audit"
-            className="btn-secondary px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#111827] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-white/[0.06]"
           >
             Start New Audit
           </Link>
         </header>
 
-        {/* 1) VerdictCard */}
-        <section className="pt-1">
-          {showVerdictSkeleton ? (
-            <VerdictCard mode="loading" />
-          ) : displayVerdict ? (
-            <VerdictCard
-              severity={displayVerdict.severity}
-              legal_exposure={displayVerdict.legal_exposure}
-              confidence={displayVerdict.confidence}
-              recommendation={displayVerdict.recommendation}
+        <div className="space-y-12">
+          <StorySection index="01" title="Verdict">
+            {showVerdictSkeleton ? (
+              <VerdictCard mode="loading" />
+            ) : displayVerdict ? (
+              <VerdictCard
+                severity={displayVerdict.severity}
+                legal_exposure={displayVerdict.legal_exposure}
+                confidence={displayVerdict.confidence}
+                recommendation={displayVerdict.recommendation}
+              >
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={openSandbox}
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#6366F1] px-5 py-3 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-[#6366F1]/20 transition hover:bg-[#8B5CF6]"
+                  >
+                    <Play size={16} className="fill-white" />
+                    Run Simulation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void applyRecommendedFix()}
+                    disabled={applyFixLoading || !jobId}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0B1220] px-5 py-3 text-sm font-black uppercase tracking-widest text-white transition hover:bg-white/[0.06] disabled:opacity-50"
+                  >
+                    {applyFixLoading ? <Loader size={16} className="animate-spin" /> : <Wrench size={16} />}
+                    Apply Fix
+                  </button>
+                </div>
+                {applyFixMessage && (
+                  <div
+                    role="status"
+                    className={`mt-4 flex items-start gap-3 rounded-2xl border p-4 text-sm ${
+                      applyFixMessage.type === 'success'
+                        ? 'border-[#10B981]/30 bg-[#10B981]/10 text-emerald-100'
+                        : 'border-[#EF4444]/30 bg-[#EF4444]/10 text-rose-100'
+                    }`}
+                  >
+                    {applyFixMessage.type === 'success' ? (
+                      <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[#10B981]" />
+                    ) : (
+                      <AlertTriangle size={18} className="mt-0.5 shrink-0 text-[#EF4444]" />
+                    )}
+                    <span>{applyFixMessage.text}</span>
+                  </div>
+                )}
+              </VerdictCard>
+            ) : showVerdictEmpty ? (
+              <VerdictCard mode="empty" />
+            ) : null}
+          </StorySection>
+
+          {auditSummary && (
+            <StorySection index="02" title="Insight Banner">
+              <ImpactSummaryBanner
+                disparity_score={auditSummary.disparity}
+                impacted_group={auditSummary.group ?? auditSummary.impacted_group}
+                law={auditSummary.law}
+                affected_count={auditSummary.affected ?? auditSummary.affected_count}
+                improved_count={auditSummary.improved_count}
+              />
+            </StorySection>
+          )}
+
+          {auditSummary && (
+            <StorySection index="03" title="Why This Matters">
+              <WhyThisMatters
+                group={auditSummary.group ?? auditSummary.impacted_group}
+                law={auditSummary.law}
+                affectedCount={auditSummary.affected ?? auditSummary.affected_count}
+              />
+            </StorySection>
+          )}
+
+          <StorySection index="04" title="Regulatory Passport">
+            <FairnessPassport />
+          </StorySection>
+
+          <StorySection index="05" title="Impact Panel">
+            <ImpactMetrics
+              totalRows={impactTotalRows}
+              subgroupSize={impactSubgroupSize}
+              disparityGap={impactDisparityGap}
+              affectedGroup={impactAffectedGroup}
+              beforeDisparityPercent={beforeDisparityPercent}
+              afterDisparityPercent={afterDisparityPercent}
             />
-          ) : showVerdictEmpty ? (
-            <VerdictCard mode="empty" />
-          ) : null}
-        </section>
+          </StorySection>
 
-        {/* 2) ImpactSummaryBanner */}
-        {auditSummary && (
-          <section className="border-t border-slate-800/70 pt-6">
-            <ImpactSummaryBanner
-              disparity_score={auditSummary.disparity}
-              impacted_group={auditSummary.group ?? auditSummary.impacted_group}
-              law={auditSummary.law}
-              affected_count={auditSummary.affected ?? auditSummary.affected_count}
-              improved_count={auditSummary.improved_count}
-            />
-          </section>
-        )}
-
-        {/* 3) WhyThisMatters */}
-        {auditSummary && (
-          <section className="border-t border-slate-800/70 pt-6">
-            <WhyThisMatters />
-          </section>
-        )}
-
-        {/* 4) FairnessPassport (regulatory) */}
-        <section className="border-t border-slate-800/70 pt-6">
-          <FairnessPassport />
-        </section>
-
-        {/* 5) ImpactMetrics */}
-        <section className="border-t border-slate-800/70 pt-6">
-          <ImpactMetrics
-            totalRows={impactTotalRows}
-            subgroupSize={impactSubgroupSize}
-            disparityGap={impactDisparityGap}
-            affectedGroup={impactAffectedGroup}
-            beforeDisparityPercent={beforeDisparityPercent}
-            afterDisparityPercent={afterDisparityPercent}
-          />
-        </section>
-
-        {/* 6) Charts (disparities) */}
-        <section className="border-t border-slate-800/70 pt-6 space-y-6">
-          <div className="glass-panel p-8">
-            <h3 className="text-xs mb-4 flex items-center gap-2 text-slate-500">
-              <ShieldCheck size={16} /> Overall Risk Profile
-            </h3>
-            <div className="h-72">
-              <ResponsiveContainer>
-                <RadarChart data={radarData}>
-                  <PolarGrid />
-                  <PolarAngleAxis dataKey="attribute" />
-                  <PolarRadiusAxis domain={[0, 0.5]} />
-                  <Radar dataKey="disparity" fillOpacity={0.6} />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            {Object.keys(disparities).map((attr) => (
-              <div key={attr} className="glass-panel p-6 border border-slate-700/60 rounded-2xl">
-                <h4 className="font-bold text-lg flex items-center gap-2">
-                  {attr}
-                  {disparities[attr].warning && (
-                    <AlertTriangle className="text-red-500" />
-                  )}
-                </h4>
-                <MetricStatus
-                  label="Disparity Score"
-                  value={Number(disparities[attr].disparity_score) || 0}
-                  threshold={0.2}
-                  tooltip="General fairness threshold: disparity scores above 0.20 require mitigation review."
-                  className="mt-1"
-                />
-
-                <div className="grid md:grid-cols-2 gap-6 mt-4">
-                  <ResponsiveContainer height={200}>
-                    <BarChart data={disparities[attr].subgroups} layout="vertical">
-                      <XAxis type="number" domain={[0, 1]} hide />
-                      <YAxis dataKey="subgroup" type="category" />
-                      <Tooltip />
-                      <Bar dataKey="selection_rate">
-                        {disparities[attr].subgroups.map((entry: any, i: number) => (
-                          <Cell key={i} fill={entry.selection_rate < 0.2 ? '#f43f5e' : '#0ea5e9'} />
-                        ))}
-                      </Bar>
-                    </BarChart>
+          <StorySection index="06" title="Charts">
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-white/[0.08] bg-[#111827] p-8">
+                <h3 className="text-xs mb-4 flex items-center gap-2 font-black uppercase tracking-[0.18em] text-[#9CA3AF]">
+                  <ShieldCheck size={16} /> Overall Risk Profile
+                </h3>
+                <div className="h-72">
+                  <ResponsiveContainer>
+                    <RadarChart data={radarData}>
+                      <PolarGrid />
+                      <PolarAngleAxis dataKey="attribute" />
+                      <PolarRadiusAxis domain={[0, 0.5]} />
+                      <Radar dataKey="disparity" fill="#6366F1" fillOpacity={0.6} stroke="#8B5CF6" />
+                    </RadarChart>
                   </ResponsiveContainer>
-
-                  {disparities[attr].subgroups.some((sg: any) => sg.accuracy != null) && (
-                    <ResponsiveContainer height={200}>
-                      <BarChart data={disparities[attr].subgroups} layout="vertical">
-                        <XAxis type="number" domain={[0, 1]} hide />
-                        <YAxis dataKey="subgroup" type="category" />
-                        <Tooltip />
-                        <Bar dataKey="accuracy">
-                          {disparities[attr].subgroups.map((entry: any, i: number) => (
-                            <Cell key={i} fill={entry.accuracy < 0.7 ? '#f59e0b' : '#10b981'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
 
-        {/* 7) ProxyBiasHunter */}
-        <section className="border-t border-slate-800/70 pt-6">
-          <ProxyBiasHunter />
-        </section>
+              <div className="space-y-6">
+                {Object.keys(disparities).map((attr) => (
+                  <div key={attr} className="rounded-3xl border border-white/[0.08] bg-[#111827] p-6">
+                    <h4 className="font-black text-lg flex items-center gap-2 text-white">
+                      {attr}
+                      {disparities[attr].warning && (
+                        <AlertTriangle className="text-[#EF4444]" />
+                      )}
+                    </h4>
+                    <MetricStatus
+                      label="Disparity Score"
+                      value={Number(disparities[attr].disparity_score) || 0}
+                      threshold={0.2}
+                      tooltip="General fairness threshold: disparity scores above 0.20 require mitigation review."
+                      className="mt-2"
+                    />
 
-        {/* 8) AI Copilot explanation */}
-        <section className="border-t border-slate-800/70 pt-6 space-y-6">
-          <FairnessCopilot />
-          <div className="glass-panel p-6">
-            <h3 className="text-xl mb-2 flex items-center gap-2">
-              <AlertTriangle /> AI Copilot Explanation
-            </h3>
-            <p className="text-slate-300 whitespace-pre-wrap">
-              {summary || (typeof explanation === 'object' ? explanation?.summary : explanation) || "Run copilot to see an AI-generated narrative."}
-            </p>
-          </div>
-        </section>
+                    <div className="grid md:grid-cols-2 gap-6 mt-5">
+                      <ResponsiveContainer height={200}>
+                        <BarChart data={disparities[attr].subgroups} layout="vertical">
+                          <XAxis type="number" domain={[0, 1]} hide />
+                          <YAxis dataKey="subgroup" type="category" />
+                          <Tooltip />
+                          <Bar dataKey="selection_rate">
+                            {disparities[attr].subgroups.map((entry: any, i: number) => (
+                              <Cell key={i} fill={entry.selection_rate < 0.2 ? '#EF4444' : '#6366F1'} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+
+                      {disparities[attr].subgroups.some((sg: any) => sg.accuracy != null) && (
+                        <ResponsiveContainer height={200}>
+                          <BarChart data={disparities[attr].subgroups} layout="vertical">
+                            <XAxis type="number" domain={[0, 1]} hide />
+                            <YAxis dataKey="subgroup" type="category" />
+                            <Tooltip />
+                            <Bar dataKey="accuracy">
+                              {disparities[attr].subgroups.map((entry: any, i: number) => (
+                                <Cell key={i} fill={entry.accuracy < 0.7 ? '#F59E0B' : '#10B981'} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </StorySection>
+
+          <StorySection index="07" title="Proxy Bias Hunter">
+            <ProxyBiasHunter />
+          </StorySection>
+
+          <StorySection index="08" title="AI Insight">
+            <div className="rounded-3xl border border-white/[0.08] bg-[#111827] p-6">
+              <h3 className="text-xl font-black mb-3 flex items-center gap-2 text-white">
+                <AlertTriangle className="text-[#F59E0B]" /> AI Copilot Explanation
+              </h3>
+              <p className="text-[#D1D5DB] whitespace-pre-wrap leading-relaxed">
+                {summary || (typeof explanation === 'object' ? explanation?.summary : explanation) || 'Run copilot to see an AI-generated narrative.'}
+              </p>
+            </div>
+          </StorySection>
+
+          <StorySection index="09" title="Copilot">
+            <FairnessCopilot />
+          </StorySection>
+        </div>
       </div>
     );
   }
@@ -340,10 +445,35 @@ const LIVE_DEMO_USE_CASE = 'Hiring';
 const LIVE_DEMO_PROTECTED = ['gender', 'race'] as const;
 const LIVE_DEMO_TARGET = 'income';
 
+type RecentAudit = {
+  job_id: string;
+  filename: string;
+  upload_time?: string;
+  analysis_time?: string;
+  has_results?: boolean;
+  risk_level?: string;
+};
+
+function RiskBadge({ level }: { level?: string }) {
+  const normalized = level || 'Unknown';
+  const cls = normalized === 'High' || normalized === 'Critical'
+    ? 'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30'
+    : normalized === 'Medium'
+      ? 'bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30'
+      : 'bg-[#10B981]/10 text-[#10B981] border-[#10B981]/30';
+  return (
+    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${cls}`}>
+      {normalized}
+    </span>
+  );
+}
+
 function DashboardEmptyState() {
   const navigate = useNavigate();
   const [liveDemoLoading, setLiveDemoLoading] = useState(false);
   const [liveDemoError, setLiveDemoError] = useState<string | null>(null);
+  const [recentAudits, setRecentAudits] = useState<RecentAudit[]>([]);
+  const [recentLoading, setRecentLoading] = useState(true);
 
   const {
     setFile,
@@ -382,7 +512,7 @@ function DashboardEmptyState() {
       if (!uploadRes.ok) {
         throw new Error(await getApiErrorMessage(uploadRes, 'Upload failed.'));
       }
-      const uploadData = (await uploadRes.json()) as {
+      const uploadData = unwrapAuditBody(await uploadRes.json()) as {
         job_id: string;
         columns: string[];
         column_types: Record<string, string>;
@@ -489,6 +619,25 @@ function DashboardEmptyState() {
     setAuditSummary,
   ]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setRecentLoading(true);
+    apiFetch('http://localhost:8000/audits/recent')
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error('Failed to load recent audits')))
+      .then((data) => {
+        if (!cancelled) setRecentAudits(Array.isArray(data?.audits) ? data.audits : []);
+      })
+      .catch(() => {
+        if (!cancelled) setRecentAudits([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRecentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <header className="flex justify-between items-start">
@@ -501,7 +650,7 @@ function DashboardEmptyState() {
         </Link>
       </header>
 
-      <div className="glass-panel rounded-3xl border border-slate-700/50 bg-slate-900/40 py-20 px-8 text-center space-y-6">
+      <div className="rounded-3xl border border-white/[0.08] bg-[#111827] py-20 px-8 text-center space-y-6">
         <div className="w-20 h-20 rounded-3xl bg-indigo-500/10 flex items-center justify-center mx-auto border border-indigo-500/20">
           <UploadCloud size={34} className="text-indigo-400" />
         </div>
@@ -518,7 +667,7 @@ function DashboardEmptyState() {
             onClick={handleLiveDemo}
             disabled={liveDemoLoading}
             aria-busy={liveDemoLoading}
-            className="group inline-flex items-center justify-center gap-3 w-full max-w-md mx-auto px-10 py-4 rounded-2xl text-base sm:text-lg font-black uppercase tracking-widest text-white bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:via-violet-500 hover:to-fuchsia-500 shadow-xl shadow-indigo-500/40 ring-2 ring-white/15 ring-offset-2 ring-offset-slate-900/90 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-amber-400/80 disabled:opacity-60 disabled:pointer-events-none disabled:hover:scale-100"
+            className="group inline-flex items-center justify-center gap-3 w-full max-w-md mx-auto px-10 py-4 rounded-2xl text-base sm:text-lg font-black uppercase tracking-widest text-white bg-indigo-600 hover:bg-indigo-500 shadow-xl shadow-indigo-500/25 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none disabled:hover:scale-100"
           >
             {liveDemoLoading ? (
               <Loader size={22} className="shrink-0 animate-spin text-amber-200" aria-hidden />
@@ -545,12 +694,6 @@ function DashboardEmptyState() {
               <UploadCloud size={16} /> Upload CSV
             </Link>
             <Link
-              to="/new-audit?demo=adult-income&guided=1"
-              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-950/80 hover:bg-violet-900/90 text-violet-100 border border-violet-600/50 rounded-xl font-bold transition-all hover:scale-105 active:scale-95 sm:min-w-[11rem]"
-            >
-              <Zap size={16} className="text-violet-300" /> Demo wizard
-            </Link>
-            <Link
               to="/new-audit"
               className="flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold transition-all hover:scale-105 active:scale-95 sm:min-w-[11rem]"
             >
@@ -559,6 +702,46 @@ function DashboardEmptyState() {
           </div>
         </div>
       </div>
+
+      <section className="rounded-3xl border border-white/[0.08] bg-[#111827] p-6">
+        <div className="flex items-center justify-between gap-4 mb-5">
+          <div>
+            <h2 className="text-xl font-black text-white">Recent Audits</h2>
+            <p className="text-sm text-[#9CA3AF]">Resume prior work or jump into the full audit history.</p>
+          </div>
+          <Link to="/history" className="rounded-xl bg-slate-800 border border-slate-700 px-4 py-2 text-sm font-bold text-white hover:bg-slate-700">
+            View History
+          </Link>
+        </div>
+        {recentLoading ? (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => <div key={i} className="h-16 rounded-2xl bg-slate-800/80 animate-pulse" />)}
+          </div>
+        ) : recentAudits.length === 0 ? (
+          <p className="rounded-2xl border border-slate-800 bg-[#0B1220] p-5 text-sm text-[#9CA3AF]">
+            No saved audits found yet. Run the live demo or upload a CSV to create your first record.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {recentAudits.slice(0, 5).map((audit) => (
+              <div key={audit.job_id} className="flex flex-col gap-3 rounded-2xl border border-white/[0.08] bg-[#0B1220] p-4 transition hover:border-indigo-500/40 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-bold text-white">{audit.filename || 'Untitled audit'}</p>
+                  <p className="text-xs text-[#9CA3AF]">
+                    {audit.analysis_time || audit.upload_time ? new Date(audit.analysis_time || audit.upload_time || '').toLocaleString() : 'No timestamp'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <RiskBadge level={audit.risk_level ?? (audit.has_results ? 'Medium' : 'Unknown')} />
+                  <button onClick={() => navigate('/')} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-500">
+                    Open
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

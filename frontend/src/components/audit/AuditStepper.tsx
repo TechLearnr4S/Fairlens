@@ -1,142 +1,191 @@
-import React, { useEffect } from 'react';
+import type React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuditStore } from '../../store/auditStore';
-import { Check, ArrowRight } from 'lucide-react';
+import { useAuditProgressStore, type AuditProgressStep } from '../../store/auditProgressStore';
+import { Check, ArrowRight, Eye, ShieldAlert } from 'lucide-react';
 
 export const AuditStepper: React.FC = () => {
-  const { jobId, disparities, simulation, proxies } = useAuditStore();
+  const {
+    jobId,
+    disparities,
+    simulation,
+    auditSummary,
+    protectedAttributes,
+  } = useAuditStore();
+  const { currentStep, status, advanceTo } = useAuditProgressStore();
   const navigate = useNavigate();
 
-  const steps = [
-    { id: 'upload', label: 'Upload', desc: 'Dataset Intake' },
-    { id: 'analyze', label: 'Analyze', desc: 'Config & Run' },
-    { id: 'detect', label: 'Detect', desc: 'Bias Discovery' },
-    { id: 'simulate', label: 'Simulate', desc: 'Mitigation Sandbox' },
-    { id: 'decide', label: 'Decide', desc: 'Final Strategy' },
+  const steps: { id: AuditProgressStep; label: string; desc: string; to: string }[] = [
+    { id: 1, label: 'Upload', desc: 'Dataset intake', to: '/new-audit' },
+    { id: 2, label: 'Analyze', desc: 'Configure and run', to: '/new-audit' },
+    { id: 3, label: 'Detect', desc: 'Bias discovered', to: '/' },
+    { id: 4, label: 'Simulate', desc: 'Mitigation sandbox', to: '/sandbox' },
+    { id: 5, label: 'Decide', desc: 'Governance action', to: '/' },
   ];
 
-  let currentStep = 0;
-  if (jobId) currentStep = 1;
-  if (disparities) currentStep = 2;
-  if (simulation) currentStep = 3;
-  if (simulation && simulation.status !== 'failed') currentStep = 4;
+  const disparityEntries = disparities && typeof disparities === 'object'
+    ? Object.entries(disparities as Record<string, any>)
+    : [];
+  const worst = [...disparityEntries].sort(
+    ([, a], [, b]) => Number(b?.disparity_score ?? 0) - Number(a?.disparity_score ?? 0),
+  )[0];
+  const worstAttr = auditSummary?.group ?? auditSummary?.impacted_group ?? worst?.[0] ?? protectedAttributes[0];
+  const maxDisparity = Number(worst?.[1]?.disparity_score ?? auditSummary?.disparity ?? 0);
+  const highRisk = !!disparities && maxDisparity > 0.2;
 
-  // Adaptive Guidance Logic
-  let nextBestAction = {
-    title: "Next Best Action",
-    message: "Select target and protected attributes",
-    action: "Configure Audit",
-    target: "config-section"
+  const formatAttr = (value?: string) =>
+    value ? value.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()) : 'Protected Group';
+
+  const goTo = (to: string, step?: AuditProgressStep) => {
+    if (step) advanceTo(step, jobId);
+    navigate(to);
   };
 
-  if (!jobId) {
-    nextBestAction = { title: "Next Best Action", message: "Upload your dataset to begin", action: "Upload CSV", target: "upload-section" };
-  } else if (!disparities) {
-    nextBestAction = { title: "Next Best Action", message: "Run fairness audit to identify hidden bias", action: "Run Analysis", target: "analyze-button" };
-  } else {
-    // Audit results available
-    const maxDisp = disparities ? Math.max(...Object.values(disparities).map((d: any) => d.disparity_score)) : 0;
-    const highRiskProxies = (proxies || []).filter((p: any) => (p.risk_score > 0.7 || p.severity === 'High' || p.risk_level === 'High')).length > 0;
+  const cta = !jobId
+    ? {
+        tone: 'neutral',
+        title: 'START WITH A DATASET',
+        message: 'Upload a CSV to begin the audit story.',
+        primary: 'Upload CSV',
+        primaryTo: '/new-audit',
+        primaryStep: 1 as AuditProgressStep,
+        secondary: 'View Demo',
+        secondaryTo: '/new-audit?demo=adult-income&guided=1',
+      }
+    : !disparities
+      ? {
+          tone: 'neutral',
+          title: 'ANALYSIS READY',
+          message: 'Configure attributes and run the fairness scan.',
+          primary: 'Run Analysis',
+          primaryTo: '/new-audit',
+          primaryStep: 2 as AuditProgressStep,
+          secondary: 'Dashboard',
+          secondaryTo: '/',
+        }
+      : simulation
+        ? {
+            tone: 'success',
+            title: 'DECISION READY',
+            message: 'Mitigation results are available. Review the final governance position.',
+            primary: 'View Decision',
+            primaryTo: '/',
+            primaryStep: 5 as AuditProgressStep,
+            secondary: 'Open Sandbox',
+            secondaryTo: '/sandbox',
+          }
+        : highRisk
+          ? {
+              tone: 'danger',
+              title: 'HIGH RISK DETECTED',
+              message: `Bias detected in hiring decisions (${formatAttr(worstAttr)}).`,
+              primary: 'Run Simulation',
+              primaryTo: '/sandbox',
+              primaryStep: 4 as AuditProgressStep,
+              secondary: 'View Details',
+              secondaryTo: '/',
+            }
+          : {
+              tone: 'neutral',
+              title: 'DETECTION COMPLETE',
+              message: 'Review findings, proxy risks, and the regulatory passport.',
+              primary: 'View Details',
+              primaryTo: '/',
+              primaryStep: 3 as AuditProgressStep,
+              secondary: 'Open Sandbox',
+              secondaryTo: '/sandbox',
+            };
 
-    if (maxDisp > 0.2) {
-      nextBestAction = { title: "Mitigation Required", message: "Significant bias detected. Run simulation to evaluate trade-offs.", action: "Open Sandbox", target: "simulation-sandbox" };
-    } else if (highRiskProxies) {
-      nextBestAction = { title: "Proxy Risk Detected", message: "Features correlate highly with protected traits. Remove proxies to improve fairness.", action: "Hunter Engine", target: "proxy-hunter" };
-    } else if (simulation) {
-      nextBestAction = { title: "Strategy Ready", message: "AI has identified an optimal fairness-accuracy balance.", action: "Review & Passport", target: "passport-section" };
-    } else {
-      nextBestAction = { title: "Discovery Complete", message: "Review audit findings or launch simulation sandbox.", action: "View Insights", target: "insights-section" };
-    }
-  }
+  const toneClasses = {
+    danger: 'border-[#EF4444]/35 bg-[#EF4444]/10',
+    success: 'border-[#10B981]/35 bg-[#10B981]/10',
+    neutral: 'border-[#6366F1]/30 bg-[#6366F1]/10',
+  }[cta.tone];
 
-  const scrollToSection = (id: string) => {
-    if (id === 'upload-section' || id === 'analyze-button') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      const el = document.getElementById(id);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  };
-
-  const handleAction = () => {
-    if (nextBestAction.action === "Open Sandbox") {
-      navigate("/sandbox");
-    } else {
-      scrollToSection(nextBestAction.target);
-    }
-  };
-
-  useEffect(() => {
-    // Remove existing highlights
-    const previous = document.querySelectorAll('.adaptive-highlight');
-    previous.forEach(el => el.classList.remove('adaptive-highlight'));
-    
-    // Add new highlight
-    if (nextBestAction.target) {
-      const current = document.getElementById(nextBestAction.target);
-      if (current) current.classList.add('adaptive-highlight');
-    }
-    
-    return () => {
-      const previous = document.querySelectorAll('.adaptive-highlight');
-      previous.forEach(el => el.classList.remove('adaptive-highlight'));
-    };
-  }, [nextBestAction.target, jobId, disparities, simulation]);
+  const titleClasses = {
+    danger: 'text-[#EF4444]',
+    success: 'text-[#10B981]',
+    neutral: 'text-[#8B5CF6]',
+  }[cta.tone];
 
   return (
-    <div className="w-full mb-10 space-y-4">
-      <div className="flex items-center justify-between px-2">
-        {steps.map((step, index) => (
-          <React.Fragment key={step.id}>
-            <div className="flex flex-col items-center gap-2 group relative">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-500 ${
-                index < currentStep 
-                  ? 'bg-emerald-500 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]' 
-                  : index === currentStep 
-                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-[0_0_20px_rgba(79,70,229,0.4)] animate-pulse' 
-                    : 'bg-dark-800 border-slate-700 text-slate-500'
-              }`}>
-                {index < currentStep ? <Check size={18} /> : <span className="text-xs font-black">{index + 1}</span>}
+    <div className="sticky top-0 z-40 mb-10 space-y-4 rounded-b-3xl bg-[#0B1220]/92 pb-4 pt-2 backdrop-blur-xl">
+      <div className="rounded-2xl border border-white/[0.08] bg-[#111827]/80 p-4">
+        <div className="flex items-center justify-between gap-2">
+          {steps.map((step, index) => {
+            const complete = step.id < currentStep;
+            const active = step.id === currentStep;
+            return (
+              <div key={step.id} className="contents">
+                <button
+                  type="button"
+                  onClick={() => goTo(step.to, step.id)}
+                  className="group flex min-w-0 flex-col items-center gap-2 text-center"
+                >
+                  <span
+                    className={`flex h-9 w-9 items-center justify-center rounded-full border text-xs font-black transition-colors ${
+                      complete
+                        ? 'border-[#10B981] bg-[#10B981] text-white'
+                        : active
+                          ? 'border-[#6366F1] bg-[#6366F1] text-white'
+                          : 'border-white/[0.08] bg-[#0B1220] text-[#9CA3AF]'
+                    }`}
+                  >
+                    {complete ? <Check size={16} /> : step.id}
+                  </span>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${active ? 'text-white' : 'text-[#9CA3AF]'}`}>
+                    {step.label}
+                  </span>
+                  <span className="hidden text-[10px] text-[#9CA3AF] md:block">{step.desc}</span>
+                </button>
+                {index < steps.length - 1 && (
+                  <div className="hidden h-px flex-1 bg-white/[0.08] md:block">
+                    <div
+                      className="h-px bg-[#6366F1] transition-all"
+                      style={{ width: step.id < currentStep ? '100%' : '0%' }}
+                    />
+                  </div>
+                )}
               </div>
-              <div className="text-center">
-                <p className={`text-[10px] font-black uppercase tracking-widest ${index === currentStep ? 'text-indigo-400' : 'text-slate-500'}`}>
-                  {step.label}
-                </p>
-              </div>
-              
-              <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-800 text-[9px] px-2 py-1 rounded border border-slate-700 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                {step.desc}
-              </div>
-            </div>
-            
-            {index < steps.length - 1 && (
-              <div className="flex-1 h-px bg-slate-800 mx-4 relative overflow-hidden">
-                <div className={`absolute inset-0 bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-1000 ${
-                  index < currentStep ? 'w-full' : 'w-0'
-                }`} />
-              </div>
-            )}
-          </React.Fragment>
-        ))}
+            );
+          })}
+        </div>
       </div>
-      
-      <div className="flex items-center justify-between gap-4 px-6 py-4 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl animate-in fade-in slide-in-from-bottom-2 duration-700">
-        <div className="flex items-center gap-4">
-          <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping shrink-0" />
+
+      <div className={`flex flex-col gap-4 rounded-2xl border px-5 py-4 shadow-2xl shadow-black/20 md:flex-row md:items-center md:justify-between ${toneClasses}`}>
+        <div className="flex items-start gap-4">
+          <div className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#111827] ${titleClasses}`}>
+            <ShieldAlert size={20} />
+          </div>
           <div className="space-y-0.5">
-            <p className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.2em]">{nextBestAction.title}</p>
-            <p className="text-xs font-bold text-slate-200">
-              {nextBestAction.message}
-            </p>
+            <p className={`text-[11px] font-black uppercase tracking-[0.2em] ${titleClasses}`}>{cta.title}</p>
+            <p className="text-sm font-semibold text-white">{cta.message}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-[#9CA3AF]">Status: {status}</p>
+            {highRisk && !simulation && (
+              <p className="text-xs text-[#9CA3AF]">
+                Disparate Impact: {(Number(auditSummary?.disparity ?? 1)).toFixed(2)} (Below 0.80 threshold)
+              </p>
+            )}
           </div>
         </div>
-        <button 
-          onClick={handleAction}
-          className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 group whitespace-nowrap"
-        >
-          {nextBestAction.action}
-          <ArrowRight size={12} className="group-hover:translate-x-1 transition-transform" />
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => goTo(cta.primaryTo, cta.primaryStep)}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#6366F1] px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-[#6366F1]/20 transition hover:bg-[#8B5CF6]"
+          >
+            {cta.primary}
+            <ArrowRight size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(cta.secondaryTo)}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#111827] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#E5E7EB] transition hover:bg-white/[0.06]"
+          >
+            <Eye size={14} />
+            {cta.secondary}
+          </button>
+        </div>
       </div>
     </div>
   );

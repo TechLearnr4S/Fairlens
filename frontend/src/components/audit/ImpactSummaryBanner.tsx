@@ -29,42 +29,40 @@ export const ImpactSummaryBanner: React.FC<ImpactSummaryBannerProps> = ({
   const severityConfig = {
     critical: {
       title: 'Critical Risk Detected',
-      color: 'from-red-600/20 to-rose-600/5',
-      borderColor: 'border-red-500/30',
-      textColor: 'text-red-400',
-      icon: <AlertCircle className="text-red-400 animate-pulse" size={24} />
+      bg: 'bg-[#EF4444]/10',
+      borderColor: 'border-[#EF4444]/35',
+      textColor: 'text-[#EF4444]',
+      icon: <AlertCircle className="text-[#EF4444]" size={24} />
     },
     high: {
       title: 'High Risk Detected',
-      color: 'from-orange-600/20 to-amber-600/5',
-      borderColor: 'border-orange-500/30',
-      textColor: 'text-orange-400',
-      icon: <AlertTriangle className="text-orange-400 animate-pulse" size={24} />
+      bg: 'bg-[#EF4444]/10',
+      borderColor: 'border-[#EF4444]/30',
+      textColor: 'text-[#EF4444]',
+      icon: <AlertTriangle className="text-[#EF4444]" size={24} />
     },
     medium: {
       title: 'Medium Risk Detected',
-      color: 'from-yellow-600/20 to-amber-600/5',
-      borderColor: 'border-yellow-500/30',
-      textColor: 'text-yellow-400',
-      icon: <AlertTriangle className="text-yellow-400" size={24} />
+      bg: 'bg-[#F59E0B]/10',
+      borderColor: 'border-[#F59E0B]/30',
+      textColor: 'text-[#F59E0B]',
+      icon: <AlertTriangle className="text-[#F59E0B]" size={24} />
     },
     low: {
       title: 'Low Risk Detected',
-      color: 'from-emerald-600/20 to-green-600/5',
-      borderColor: 'border-emerald-500/30',
-      textColor: 'text-emerald-400',
-      icon: <CheckCircle className="text-emerald-400" size={24} />
+      bg: 'bg-[#10B981]/10',
+      borderColor: 'border-[#10B981]/30',
+      textColor: 'text-[#10B981]',
+      icon: <CheckCircle className="text-[#10B981]" size={24} />
     }
   };
 
   const current = severityConfig[severity];
 
   return (
-    <div className={`glass-panel p-6 rounded-2xl border ${current.borderColor} bg-gradient-to-br ${current.color} shadow-2xl relative overflow-hidden transition-all duration-500 hover:scale-[1.02]`}>
-      <div className="absolute -right-12 -top-12 w-40 h-40 bg-gradient-to-br from-slate-400/10 to-transparent blur-3xl rounded-full pointer-events-none" />
-
+    <div className={`rounded-3xl border ${current.borderColor} ${current.bg} p-6 shadow-2xl shadow-black/20`}>
       <div className="flex items-start gap-4">
-        <div className="p-3 rounded-xl bg-slate-900/50 border border-slate-700/30 shadow-inner shrink-0">
+        <div className="p-3 rounded-xl bg-[#0B1220] border border-white/[0.08] shrink-0">
           {current.icon}
         </div>
 
@@ -84,8 +82,12 @@ export const ImpactSummaryBanner: React.FC<ImpactSummaryBannerProps> = ({
               value={Number(score) || 0}
               threshold={0.8}
               lowerIsWorse
-              tooltip="EEOC four-fifths rule: values below 0.80 may indicate adverse impact."
+              tooltip={`Disparate Impact: ${(Number(score) || 0).toFixed(2)} (${score < 0.8 ? 'Below' : 'At or above'} 0.80 threshold)`}
             />
+            <p className="text-xs text-[#9CA3AF]">
+              Disparate Impact: <span className="font-mono text-white">{(Number(score) || 0).toFixed(2)}</span>{' '}
+              {score < 0.8 ? 'Below' : 'At or above'} 0.80 threshold
+            </p>
 
             <div className="flex items-center gap-2">
               <span className="text-slate-500">-&gt;</span>
@@ -96,7 +98,7 @@ export const ImpactSummaryBanner: React.FC<ImpactSummaryBannerProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 pt-2 border-t border-slate-700/20 mt-2">
+          <div className="flex items-center gap-2 pt-2 border-t border-white/[0.08] mt-2">
             <TrendingDown className="text-slate-400" size={16} />
             <p className="text-xs font-bold text-slate-400">
               ~<span className="text-white font-black">{typeof affected_count === 'number' ? affected_count.toLocaleString() : affected_count}</span> affected

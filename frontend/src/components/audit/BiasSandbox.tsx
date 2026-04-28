@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuditStore } from '../../store/auditStore';
+import { useAuditProgressStore } from '../../store/auditProgressStore';
 import { 
   BarChart, 
   Bar, 
@@ -25,12 +26,14 @@ import { AuditEmptyState } from '../ui/AuditEmptyState';
 export default function BiasSandbox() {
   const { addToast } = useToast();
   const { jobId, simulation, setSimulation, isSimulating, setIsSimulating, columns, targetColumn, protectedAttributes } = useAuditStore();
+  const advanceTo = useAuditProgressStore((state) => state.advanceTo);
   const [method, setMethod] = useState<'threshold_adjustment' | 'feature_removal' | 'reweighing'>('threshold_adjustment');
   const [threshold, setThreshold] = useState(0.5);
   const [isDebouncing, setIsDebouncing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [tradeoffCurve, setTradeoffCurve] = useState<any[]>([]);
   const [recommendation, setRecommendation] = useState<any>(null);
+  const [simulationMessage, setSimulationMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   
   // Filter out target and protected attributes from removable features
@@ -61,6 +64,7 @@ export default function BiasSandbox() {
     abortControllerRef.current = controller;
     
     setIsSimulating(true);
+    setSimulationMessage(null);
     try {
       const res = await apiFetch(`http://localhost:8000/audits/${jobId}/simulate`, {
         method: 'POST',
@@ -87,15 +91,26 @@ export default function BiasSandbox() {
       if (res.ok) {
         if (controller.signal.aborted) return;
         setSimulation(data);
+        advanceTo(5, jobId);
+        setSimulationMessage({
+          type: 'success',
+          text: 'Simulation complete. Review the before/after impact and decision step.',
+        });
       } else {
         if (controller.signal.aborted) return;
-        addToast(data.detail || "Simulation failed", 'error');
+        const message = data.detail || "Simulation failed";
+        setSimulationMessage({ type: 'error', text: message });
+        addToast(message, 'error');
       }
     } catch (e: unknown) {
       const err = e as { name?: string };
       if (err.name === 'AbortError') return;
-      if (isRequestTimeout(e)) return;
+      if (isRequestTimeout(e)) {
+        setSimulationMessage({ type: 'error', text: 'Simulation timed out. Try again after confirming the API is running.' });
+        return;
+      }
       console.error(e);
+      setSimulationMessage({ type: 'error', text: 'Failed to connect to simulation engine.' });
       addToast("Failed to connect to simulation engine.", 'error');
     } finally {
       // Only release simulation lock if this was the latest request
@@ -103,7 +118,10 @@ export default function BiasSandbox() {
         setIsSimulating(false);
       }
     }
-  }, [jobId, method, threshold, feature, removableFeatures, setIsSimulating, setSimulation, addToast]);
+  }, [jobId, method, threshold, feature, removableFeatures, setIsSimulating, setSimulation, advanceTo, addToast]);
+
+  const runSimulationRef = useRef(runSimulation);
+  runSimulationRef.current = runSimulation;
 
   const handleOptimize = async () => {
     if (!jobId) return;
@@ -146,14 +164,14 @@ export default function BiasSandbox() {
     }
   }, [jobId, simulation, fetchRecommendation]);
 
-  // Debounced simulation trigger
+  // Debounced simulation trigger — keep runSimulation off deps to avoid loops when callback identity churns.
   useEffect(() => {
     if (!jobId) return;
 
     setIsDebouncing(true);
     const timer = setTimeout(() => {
       setIsDebouncing(false);
-      runSimulation();
+      void runSimulationRef.current();
     }, 400);
 
     return () => {
@@ -163,7 +181,7 @@ export default function BiasSandbox() {
         abortControllerRef.current.abort();
       }
     };
-  }, [method, threshold, feature, runSimulation, jobId]);
+  }, [method, threshold, feature, jobId]);
 
   const chartData = simulation ? [
     { name: 'Accuracy', before: simulation.before.accuracy, after: simulation.after.accuracy },
@@ -252,6 +270,35 @@ export default function BiasSandbox() {
             </div>
         </div>
       </div>
+
+      {simulationMessage && (
+        <div
+          role="status"
+          className={`mb-6 flex items-start gap-3 rounded-2xl border p-4 text-sm ${
+            simulationMessage.type === 'success'
+              ? 'border-[#10B981]/30 bg-[#10B981]/10 text-emerald-100'
+              : 'border-[#EF4444]/30 bg-[#EF4444]/10 text-rose-100'
+          }`}
+        >
+          {simulationMessage.type === 'success' ? (
+            <TrendingUp size={18} className="mt-0.5 shrink-0 text-[#10B981]" />
+          ) : (
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[#EF4444]" />
+          )}
+          <span>{simulationMessage.text}</span>
+        </div>
+      )}
+
+      {isSimulating && !simulation && (
+        <div className="mb-6 rounded-2xl border border-white/[0.08] bg-[#111827] p-5" aria-busy="true">
+          <div className="h-4 w-40 animate-pulse rounded bg-slate-700/80" />
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="h-20 animate-pulse rounded-xl bg-slate-800/80" />
+            <div className="h-20 animate-pulse rounded-xl bg-slate-800/80" />
+            <div className="h-20 animate-pulse rounded-xl bg-slate-800/80" />
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         {/* Controls Panel */}

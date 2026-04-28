@@ -611,13 +611,6 @@ async def simulate_tampering(job_id: str):
         raise HTTPException(status_code=404, detail="No logs found to tamper with.")
     return {"status": "success", "message": "Log entry modified. Hash chain is now broken."}
 
-@app.get("/audits/{job_id}/verify")
-async def verify_audit_trail(job_id: str):
-    """
-    Cryptographically verify the integrity of the audit trail.
-    """
-    return verify_audit(job_id)
-
 @app.post("/audits/{job_id}/model-evaluation")
 async def evaluate_model(job_id: str, payload: ModelEvaluationRequest):
     if job_id not in LOCAL_DATASTORE:
@@ -1040,6 +1033,7 @@ async def get_proxy_risks(job_id: str, payload: CorrelationRequest):
             "status": "success",
             "job_id": job_id,
             "proxy_risks": proxy_risks,
+            "correlation_matrix": correlation_results,
         }
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

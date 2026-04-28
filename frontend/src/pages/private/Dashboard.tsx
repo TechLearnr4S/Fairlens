@@ -275,7 +275,7 @@ export default function Dashboard() {
               <AlertTriangle /> AI Copilot Explanation
             </h3>
             <p className="text-slate-300 whitespace-pre-wrap">
-              {summary || explanation || "Run copilot to see an AI-generated narrative."}
+              {summary || (typeof explanation === 'object' ? explanation?.summary : explanation) || "Run copilot to see an AI-generated narrative."}
             </p>
           </div>
         </section>
@@ -320,10 +320,10 @@ function DashboardEmptyState() {
             <UploadCloud size={16} /> Upload CSV
           </Link>
           <Link
-            to="/new-audit"
+            to="/new-audit?demo=adult-income"
             className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold transition-all hover:scale-105 active:scale-95"
           >
-            New Audit
+            Try Live Demo
           </Link>
         </div>
       </div>

@@ -48,6 +48,10 @@ interface VerifyReport {
   summary: string;
 }
 
+type VerifyResponse = Partial<VerifyReport> & {
+  reason?: string;
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const ACTION_LABELS: Record<string, string> = {
@@ -61,6 +65,38 @@ const ACTION_LABELS: Record<string, string> = {
 
 const fmt = (iso: string) => {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
+};
+
+const normalizeVerifyReport = (data: VerifyResponse, jobId: string): VerifyReport => {
+  const steps = Array.isArray(data.steps) ? data.steps : [];
+  const brokenAt = typeof data.broken_at === 'number' ? data.broken_at : null;
+  const isValid = typeof data.is_valid === 'boolean' ? data.is_valid : true;
+  const totalEntries = typeof data.total_entries === 'number' ? data.total_entries : steps.length;
+  const checksPassed = typeof data.checks_passed === 'number'
+    ? data.checks_passed
+    : (isValid ? totalEntries : Math.max(totalEntries - 1, 0));
+  const checksFailed = typeof data.checks_failed === 'number'
+    ? data.checks_failed
+    : Math.max(totalEntries - checksPassed, 0);
+
+  return {
+    job_id: data.job_id ?? jobId,
+    is_valid: isValid,
+    broken_at: brokenAt,
+    total_entries: totalEntries,
+    checks_passed: checksPassed,
+    checks_failed: checksFailed,
+    steps,
+    failure: data.failure ?? (brokenAt !== null
+      ? {
+          index: brokenAt,
+          reason: data.reason ?? 'Audit integrity verification failed.',
+        }
+      : null),
+    summary: data.summary ?? data.reason ?? (isValid
+      ? 'Audit integrity verified.'
+      : 'Audit integrity verification failed.'),
+  };
 };
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -158,9 +194,9 @@ export default function AuditIntegrity() {
     try {
       const res = await apiFetch(`http://localhost:8000/audits/${jobId}/verify`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      let data: VerifyReport;
+      let data: VerifyResponse;
       try { data = await res.json(); } catch { throw new Error('Invalid JSON response'); }
-      setReport(data);
+      setReport(normalizeVerifyReport(data, jobId));
       setVerifiedAt(new Date().toLocaleString());
     } catch (e: unknown) {
       if (!isRequestTimeout(e)) {

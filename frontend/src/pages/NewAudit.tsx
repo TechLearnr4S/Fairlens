@@ -4,7 +4,7 @@ import {
   Shield, Target, AlertCircle, Briefcase, CreditCard, HeartPulse, 
   Scale, LayoutGrid, Play
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuditStore } from '../store/auditStore';
 import { auth } from '../firebase';
 import { useToast } from '../components/providers/ToastProvider';
@@ -56,6 +56,64 @@ function listDatasetRecommendedColumns(columnsList: string[]): string[] {
   return columnsList.filter(columnMatchesDatasetRecommendation);
 }
 
+function guessTargetPriority(
+  col: string,
+  previewRows: Record<string, unknown>[],
+  types: Record<string, string>,
+): number {
+  const lower = col.toLowerCase();
+  let score = 0;
+
+  if (
+    lower.includes('target') ||
+    lower.includes('label') ||
+    lower.includes('decision') ||
+    lower.includes('approved') ||
+    lower.includes('income') ||
+    lower.includes('hired')
+  ) {
+    score += 6;
+  }
+
+  if (types[col] === 'categorical') {
+    score += 2;
+  }
+
+  const uniqueValues = new Set(
+    previewRows
+      .map((row) => row[col])
+      .filter((value) => value !== undefined && value !== null && value !== '-'),
+  );
+
+  if (uniqueValues.size === 2) {
+    score += 5;
+  } else if (uniqueValues.size > 2 && uniqueValues.size <= 5) {
+    score += 2;
+  }
+
+  return score;
+}
+
+function pickDemoDefaults(columnsList: string[]): {
+  useCase: string;
+  targetColumn: string | null;
+  protectedAttributes: string[];
+} {
+  const findColumn = (candidates: string[]) =>
+    columnsList.find((column) => candidates.includes(column.toLowerCase())) ?? null;
+
+  const targetColumn = findColumn(['income', 'hired', 'approved', 'target', 'label']);
+  const protectedAttributes = columnsList.filter((column) =>
+    ['sex', 'race', 'age', 'gender', 'ethnicity'].includes(column.toLowerCase()),
+  );
+
+  return {
+    useCase: 'Hiring',
+    targetColumn,
+    protectedAttributes,
+  };
+}
+
 const getSmartBadge = (col: string) => {
   const lower = col.toLowerCase();
   if (['sex', 'gender'].includes(lower)) return { label: 'Likely gender-sensitive', color: 'bg-pink-500/20 text-pink-400 border-pink-500/30' };
@@ -69,6 +127,7 @@ const getSmartBadge = (col: string) => {
 
 export default function NewAudit() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { addToast } = useToast();
   const { 
     currentFile, setFile, 
@@ -79,7 +138,8 @@ export default function NewAudit() {
     targetColumn, setTargetColumn, 
     protectedAttributes, toggleProtectedAttribute, setProtectedAttributes,
     jobId, setJobId, 
-    setDisparities, setVerdict, setProxies, setExplanation, setAuditSummary
+    setDisparities, setVerdict, setProxies, setExplanation, setAuditSummary,
+    setProxyRisks, setProxySummary, setCorrelationMatrix, setCopilotSummary
   } = useAuditStore();
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,11 +153,19 @@ export default function NewAudit() {
   const [useCase, setUseCase] = useState<string>('');
   const [groundTruthColumn, setGroundTruthColumn] = useState<string | null>(null);
   const step2RecommendationSeeded = useRef(false);
+  const demoRunStarted = useRef(false);
 
   const recommendedColumnSet = useMemo(() => {
     const rec = listDatasetRecommendedColumns(columns);
     return new Set(rec);
   }, [columns]);
+
+  const rankedTargetColumns = useMemo(
+    () => [...columns].sort(
+      (a, b) => guessTargetPriority(b, preview, columnTypes) - guessTargetPriority(a, preview, columnTypes),
+    ),
+    [columns, preview, columnTypes],
+  );
 
   useEffect(() => {
     if (currentStep < 2) {
@@ -145,10 +213,18 @@ export default function NewAudit() {
         setFileUrl(data.file_url);
         setCurrentStep(1); // Proceed to step 1
       }
+      return data as {
+        columns: string[];
+        column_types: Record<string, string>;
+        preview: Record<string, unknown>[];
+        job_id: string;
+        file_url: string | null;
+      };
     } catch (error) {
       console.error(error);
       if (isRequestTimeout(error)) return;
       addToast(error instanceof Error ? error.message : "Failed to parse CSV via backend.", 'error');
+      return null;
     } finally {
       setIsUploading(false);
     }
@@ -170,8 +246,16 @@ export default function NewAudit() {
     setIsDragging(false);
   }, []);
 
-  const handleConfigSave = async () => {
-    if (!targetColumn || protectedAttributes.length === 0 || !jobId) return;
+  const handleConfigSave = async (overrides?: {
+    targetColumn?: string;
+    protectedAttributes?: string[];
+    useCase?: string;
+  }) => {
+    const activeTarget = overrides?.targetColumn ?? targetColumn;
+    const activeProtectedAttributes = overrides?.protectedAttributes ?? protectedAttributes;
+    const activeUseCase = overrides?.useCase ?? useCase;
+
+    if (!activeTarget || activeProtectedAttributes.length === 0 || !jobId) return;
 
     setIsConfigSaving(true);
     try {
@@ -181,12 +265,12 @@ export default function NewAudit() {
         body: JSON.stringify({
           job_id: jobId,
           user_id: auth.currentUser?.uid || "anonymous",
-          target: targetColumn,
-          target_column: targetColumn,
-          protected_attributes: protectedAttributes,
+          target: activeTarget,
+          target_column: activeTarget,
+          protected_attributes: activeProtectedAttributes,
           filename: currentFile?.name,
           file_url: fileUrl,
-          use_case: useCase || 'Other'
+          use_case: activeUseCase || 'Other'
         })
       });
       console.log('Config response', configRes);
@@ -201,22 +285,71 @@ export default function NewAudit() {
     }
   };
 
-  const startAudit = async () => {
+  const runDemoPostProcessing = async (
+    activeJobId: string,
+    activeTarget: string,
+    activeProtectedAttributes: string[],
+  ) => {
+    const [proxyRes, copilotRes] = await Promise.allSettled([
+      apiFetch(`http://localhost:8000/audits/${activeJobId}/proxy-risks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          protected_attributes: activeProtectedAttributes,
+          target_column: activeTarget,
+        }),
+      }),
+      apiFetch(`http://localhost:8000/audits/${activeJobId}/copilot`, {
+        method: 'POST',
+      }),
+    ]);
+
+    if (proxyRes.status === 'fulfilled' && proxyRes.value.ok) {
+      const proxyData = await proxyRes.value.json();
+      const proxyRisks = Array.isArray(proxyData.proxy_risks) ? proxyData.proxy_risks : [];
+      setProxyRisks(proxyRisks);
+      setCorrelationMatrix(proxyData.correlation_matrix ?? null);
+      setProxySummary({
+        high_risk_count: proxyRisks.filter((risk: { risk_level?: string }) => risk.risk_level === 'High').length,
+        top_proxy: proxyRisks[0]?.feature || 'None',
+      });
+    }
+
+    if (copilotRes.status === 'fulfilled' && copilotRes.value.ok) {
+      const copilotData = await copilotRes.value.json();
+      setCopilotSummary(copilotData);
+    }
+  };
+
+  const startAudit = async (options?: {
+    demoMode?: boolean;
+    targetColumn?: string;
+    protectedAttributes?: string[];
+    useCase?: string;
+  }) => {
     setIsRunning(true);
     try {
-      if (!jobId || !targetColumn || protectedAttributes.length === 0) {
+      const activeTarget = options?.targetColumn ?? targetColumn;
+      const activeProtectedAttributes = options?.protectedAttributes ?? protectedAttributes;
+      const activeUseCase = options?.useCase ?? useCase;
+
+      if (!jobId || !activeTarget || activeProtectedAttributes.length === 0) {
         throw new Error('Select a target column and at least one protected attribute before running the audit.');
       }
-      await handleConfigSave();
+      await handleConfigSave({
+        targetColumn: activeTarget,
+        protectedAttributes: activeProtectedAttributes,
+        useCase: activeUseCase,
+      });
       setAuditSummary(null);
 
       const res = await apiFetch(`http://localhost:8000/audits/${jobId}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          target_column: targetColumn,
-          protected_attributes: protectedAttributes,
-          use_case: useCase || 'Other',
+          target_column: activeTarget,
+          protected_attributes: activeProtectedAttributes,
+          use_case: activeUseCase || 'Other',
           ground_truth_column: groundTruthColumn
         })
       });
@@ -231,6 +364,9 @@ export default function NewAudit() {
          setVerdict(data.verdict ?? null);
          setAuditSummary(buildAuditSummary(data.disparities));
          setExplanation(data.explanation || null);
+         if (options?.demoMode) {
+           await runDemoPostProcessing(jobId, activeTarget, activeProtectedAttributes);
+         }
          navigate('/');
       }
     } catch (error) {
@@ -241,6 +377,45 @@ export default function NewAudit() {
        setIsRunning(false);
     }
   };
+
+  const runLiveDemo = useCallback(async () => {
+    if (demoRunStarted.current) return;
+    demoRunStarted.current = true;
+
+    try {
+      const res = await fetch('/demo_data/adult_income_sample.csv');
+      if (!res.ok) throw new Error('Demo dataset is unavailable.');
+
+      const blob = await res.blob();
+      const demoFile = new File([blob], 'adult_income_sample.csv', { type: 'text/csv' });
+      const upload = await uploadToBackend(demoFile);
+      if (!upload) return;
+
+      const defaults = pickDemoDefaults(upload.columns);
+      if (!defaults.targetColumn || defaults.protectedAttributes.length === 0) {
+        throw new Error('Demo dataset columns did not match the expected audit defaults.');
+      }
+
+      setUseCase(defaults.useCase);
+      setProtectedAttributes(defaults.protectedAttributes);
+      setTargetColumn(defaults.targetColumn);
+      setGroundTruthColumn(null);
+      setCurrentStep(4);
+
+      addToast('Loaded live demo dataset. Running a complete audit now.', 'info');
+      window.setTimeout(() => {
+        void startAudit({
+          demoMode: true,
+          targetColumn: defaults.targetColumn ?? undefined,
+          protectedAttributes: defaults.protectedAttributes,
+          useCase: defaults.useCase,
+        });
+      }, 0);
+    } catch (error) {
+      demoRunStarted.current = false;
+      addToast(error instanceof Error ? error.message : 'Unable to start the live demo.', 'error');
+    }
+  }, [addToast, setProtectedAttributes, setTargetColumn]);
 
   const handleUseCaseSelect = (id: string) => {
     setUseCase(id);
@@ -302,6 +477,12 @@ export default function NewAudit() {
   const handlePrev = () => {
     if (currentStep > 1) setCurrentStep(c => c - 1);
   };
+
+  useEffect(() => {
+    if (searchParams.get('demo') === 'adult-income') {
+      void runLiveDemo();
+    }
+  }, [runLiveDemo, searchParams]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
@@ -435,7 +616,7 @@ export default function NewAudit() {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-            {columns.map(col => {
+            {rankedTargetColumns.map(col => {
               const badge = getSmartBadge(col);
               const isDatasetRecommended = recommendedColumnSet.has(col);
               const isSelected = protectedAttributes.includes(col);
@@ -557,7 +738,7 @@ export default function NewAudit() {
           
           <div className="flex justify-center">
             <button 
-              onClick={startAudit}
+              onClick={() => void startAudit()}
               disabled={isRunning || isConfigSaving}
               className="group relative overflow-hidden px-14 py-5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-black text-xl shadow-2xl shadow-emerald-900/30 transition-all active:scale-95 disabled:opacity-50"
             >

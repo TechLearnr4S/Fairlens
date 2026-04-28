@@ -4,6 +4,7 @@ import {
   FileText, AlertTriangle, Cpu, Layers, Clock,
   Download, Printer, ChevronDown, ChevronUp,
   CheckCircle, XCircle, AlertCircle, Info, TrendingDown,
+  Landmark, Gavel, ScrollText,
 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
@@ -39,11 +40,39 @@ interface RegulatoryViolation {
   detail?: string;
 }
 
+interface FrameworkOverviewCard {
+  role?: string;
+  name?: string;
+  body?: string;
+  reference?: string;
+  summary?: string;
+  use_case?: string;
+}
+
+interface MetricEvaluationRow {
+  protected_attribute?: string;
+  law_short?: string;
+  law_full?: string;
+  metric_label?: string;
+  metric_key?: string;
+  value?: number;
+  threshold?: number;
+  violation?: boolean;
+  severity?: string;
+  compliance_status?: string;
+  explanation?: string;
+  remediation?: string;
+}
+
 interface RegulatoryCompliance {
   framework?: RegulatoryFramework;
+  frameworks_overview?: FrameworkOverviewCard[];
+  metric_evaluations?: MetricEvaluationRow[];
   status?: string;
   violations?: RegulatoryViolation[];
   remediation_steps?: string[];
+  use_case?: string;
+  evaluated_at?: string;
 }
 
 interface ProxyRisk {
@@ -205,6 +234,198 @@ function ProxyRow({ p }: { p: ProxyRisk }) {
   );
 }
 
+function RegulatoryAggregateBadge({ status }: { status?: string }) {
+  const upper = (status ?? 'REVIEW_REQUIRED').toUpperCase();
+  const compliant = upper === 'COMPLIANT';
+  const violation = upper.includes('VIOLATION');
+
+  const cls = compliant
+    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+    : violation
+      ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+      : 'bg-amber-500/15 border-amber-500/40 text-amber-300';
+
+  const Icon = compliant ? ShieldCheck : violation ? ShieldX : ShieldAlert;
+  const label = compliant ? 'COMPLIANT' : violation ? 'VIOLATION' : upper.replace(/_/g, ' ');
+
+  return (
+    <span className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border font-black text-xs uppercase tracking-widest ${cls}`}>
+      <Icon size={14} aria-hidden /> {label}
+    </span>
+  );
+}
+
+function ComplianceRowBadge({ row }: { row: MetricEvaluationRow }) {
+  const s = (row.compliance_status ?? '').toUpperCase();
+  const cls =
+    s === 'VIOLATION_DETECTED' || row.violation
+      ? 'border-rose-500/35 bg-rose-500/10 text-rose-300'
+      : s === 'REVIEW_REQUIRED'
+        ? 'border-amber-500/35 bg-amber-500/10 text-amber-300'
+        : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300';
+
+  const label =
+    row.violation ? 'Violation' : s === 'REVIEW_REQUIRED' ? 'Review' : 'Within bounds';
+
+  return (
+    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border ${cls}`}>{label}</span>
+  );
+}
+
+function FrameworkLensCard({ card }: { card: FrameworkOverviewCard }) {
+  const primary = card.role === 'primary';
+
+  return (
+    <div
+      className={`rounded-2xl border p-5 flex flex-col gap-3 text-left ${
+        primary ? 'bg-indigo-500/[0.07] border-indigo-500/30' : 'bg-slate-900/40 border-slate-700/80'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <Landmark size={16} className={primary ? 'text-indigo-400' : 'text-slate-500'} aria-hidden />
+        <span
+          className={`text-[10px] font-black uppercase tracking-widest ${
+            primary ? 'text-indigo-300' : 'text-slate-500'
+          }`}
+        >
+          {primary ? 'Primary statute' : 'Cross-reference'}
+        </span>
+      </div>
+      <h4 className="text-sm font-black text-white leading-snug">{card.name}</h4>
+      <p className="text-xs text-slate-400">{card.body}</p>
+      {card.summary && (
+        <p className="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-3">
+          {card.summary}
+        </p>
+      )}
+      {card.reference && (
+        <p className="text-[11px] font-mono text-slate-500">
+          <ScrollText size={12} className="inline mr-1 opacity-70 align-text-bottom" aria-hidden />
+          {card.reference}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LegacyRegulatorySnapshot(props: {
+  reg: RegulatoryCompliance;
+  hasViolation: boolean;
+  regLaw: string;
+  regStatus: string;
+  regMetricLabel: string;
+  regMetricValue: number;
+  regThreshold: number;
+  regExplanation: string;
+  regRemediation: string;
+}) {
+  const {
+    reg,
+    hasViolation,
+    regLaw,
+    regStatus,
+    regMetricLabel,
+    regMetricValue,
+    regThreshold,
+    regExplanation,
+    regRemediation,
+  } = props;
+
+  return (
+    <div
+      className={`rounded-2xl border p-5 space-y-4 ${
+        hasViolation || regStatus === 'VIOLATION_DETECTED'
+          ? 'bg-rose-500/10 border-rose-500/35'
+          : regStatus === 'COMPLIANT'
+            ? 'bg-emerald-500/10 border-emerald-500/30'
+            : 'bg-amber-500/10 border-amber-500/30'
+      }`}
+    >
+      <div className="space-y-2">
+        <p className="text-sm font-bold text-slate-200">
+          Law: <span className="text-white">{regLaw}</span>
+        </p>
+        {reg?.framework?.body && (
+          <p className="text-sm font-bold text-slate-200">
+            Oversight Body: <span className="text-white">{reg.framework.body}</span>
+          </p>
+        )}
+        {reg?.framework?.reference && (
+          <p className="text-sm font-bold text-slate-200">
+            Reference: <span className="text-white">{reg.framework.reference}</span>
+          </p>
+        )}
+        <p className="text-sm font-bold text-slate-200">
+          Metric:{' '}
+          <span className="text-white">
+            {regMetricLabel} = {regMetricValue.toFixed(2)}
+          </span>
+        </p>
+        <p className="text-sm font-bold text-slate-200">
+          Threshold: <span className="text-white">{regThreshold.toFixed(2)}</span>
+        </p>
+      </div>
+
+      <div
+        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-black uppercase tracking-wider ${
+          hasViolation || regStatus === 'VIOLATION_DETECTED'
+            ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+            : regStatus === 'COMPLIANT'
+              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+              : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+        }`}
+      >
+        {hasViolation || regStatus === 'VIOLATION_DETECTED' ? (
+          <>
+            <ShieldX size={14} /> Violation Detected
+          </>
+        ) : regStatus === 'COMPLIANT' ? (
+          <>
+            <ShieldCheck size={14} /> Compliant
+          </>
+        ) : (
+          <>
+            <ShieldAlert size={14} /> Review Required
+          </>
+        )}
+      </div>
+
+      <div className="space-y-2 text-sm">
+        <p className="text-slate-200">
+          <span className="font-black text-slate-400 uppercase text-[10px] tracking-widest mr-2">Explanation</span>
+          {regExplanation}
+        </p>
+        <p className="text-slate-200">
+          <span className="font-black text-slate-400 uppercase text-[10px] tracking-widest mr-2">Remediation</span>
+          {regRemediation}
+        </p>
+      </div>
+
+      {Array.isArray(reg?.violations) && reg.violations.length > 0 && (
+        <div className="space-y-2 border-t border-slate-700/40 pt-4">
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Findings</p>
+          {reg.violations.map((violation, index) => (
+            <div
+              key={`${violation.attribute ?? 'violation'}-${index}`}
+              className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-100"
+            >
+              <p className="font-semibold text-white">
+                {violation.attribute ?? 'Audit finding'} · {violation.metric ?? 'Metric'}
+              </p>
+              <p className="mt-1 text-rose-100/90">
+                Value{' '}
+                {typeof violation.value === 'number' ? violation.value.toFixed(2) : 'N/A'} vs threshold{' '}
+                {typeof violation.threshold === 'number' ? violation.threshold.toFixed(2) : 'N/A'}
+              </p>
+              {violation.detail && <p className="mt-1 text-rose-100/90">{violation.detail}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TraceItem({ event }: { event: AuditTrace['timestamped_events'][0] }) {
   const labelMap: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
     DATASET_UPLOADED:      { label: 'Dataset Uploaded',        icon: <Download size={14} />,   color: 'text-sky-400' },
@@ -302,6 +523,11 @@ export default function FairnessPassport() {
     ?? (regStatus === 'COMPLIANT'
       ? 'Continue monitoring and keep compliance records.'
       : 'Review the highest-risk disparity and document mitigation before deployment.');
+
+  const richRegulatory =
+    !!reg &&
+    ((Array.isArray(reg.metric_evaluations) && reg.metric_evaluations.length > 0) ||
+      (Array.isArray(reg.frameworks_overview) && reg.frameworks_overview.length > 0));
 
   const riskScoreBar = Math.min((risk?.risk_score ?? 0) * 100, 100);
   const riskBarColor =
@@ -508,93 +734,165 @@ export default function FairnessPassport() {
           )}
         </Section>
 
-        {/* ── Regulatory Snapshot ─────────────────────────────────────────── */}
-        <Section icon={<AlertTriangle size={16} />} title="Regulatory Snapshot">
-          <div
-            className={`rounded-2xl border p-5 space-y-4 ${
-              hasViolation || regStatus === 'VIOLATION_DETECTED'
-                ? 'bg-rose-500/10 border-rose-500/35'
-                : regStatus === 'COMPLIANT'
-                ? 'bg-emerald-500/10 border-emerald-500/30'
-                : 'bg-amber-500/10 border-amber-500/30'
-            }`}
-          >
-            <div className="space-y-2">
-              <p className="text-sm font-bold text-slate-200">
-                Law: <span className="text-white">{regLaw}</span>
-              </p>
-              {reg?.framework?.body && (
-                <p className="text-sm font-bold text-slate-200">
-                  Oversight Body: <span className="text-white">{reg.framework.body}</span>
-                </p>
-              )}
-              {reg?.framework?.reference && (
-                <p className="text-sm font-bold text-slate-200">
-                  Reference: <span className="text-white">{reg.framework.reference}</span>
-                </p>
-              )}
-              <p className="text-sm font-bold text-slate-200">
-                Metric: <span className="text-white">{regMetricLabel} = {regMetricValue.toFixed(2)}</span>
-              </p>
-              <p className="text-sm font-bold text-slate-200">
-                Threshold: <span className="text-white">{regThreshold.toFixed(2)}</span>
-              </p>
-            </div>
-
-            <div
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-black uppercase tracking-wider ${
-                hasViolation || regStatus === 'VIOLATION_DETECTED'
-                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                  : regStatus === 'COMPLIANT'
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                  : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-              }`}
-            >
-              {hasViolation || regStatus === 'VIOLATION_DETECTED' ? (
-                <>
-                  <ShieldX size={14} /> Violation Detected
-                </>
-              ) : regStatus === 'COMPLIANT' ? (
-                <>
-                  <ShieldCheck size={14} /> Compliant
-                </>
-              ) : (
-                <>
-                  <ShieldAlert size={14} /> Review Required
-                </>
-              )}
-            </div>
-
-            <div className="space-y-2 text-sm">
-              <p className="text-slate-200">
-                <span className="font-black text-slate-400 uppercase text-[10px] tracking-widest mr-2">Explanation</span>
-                {regExplanation}
-              </p>
-              <p className="text-slate-200">
-                <span className="font-black text-slate-400 uppercase text-[10px] tracking-widest mr-2">Remediation</span>
-                {regRemediation}
-              </p>
-            </div>
-
-            {Array.isArray(reg?.violations) && reg.violations.length > 0 && (
-              <div className="space-y-2 border-t border-slate-700/40 pt-4">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                  Findings
-                </p>
-                {reg.violations.map((violation, index) => (
-                  <div key={`${violation.attribute ?? 'violation'}-${index}`} className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-100">
-                    <p className="font-semibold text-white">
-                      {violation.attribute ?? 'Audit finding'} · {violation.metric ?? 'Metric'}
-                    </p>
-                    <p className="mt-1 text-rose-100/90">
-                      Value {typeof violation.value === 'number' ? violation.value.toFixed(2) : 'N/A'} vs threshold {typeof violation.threshold === 'number' ? violation.threshold.toFixed(2) : 'N/A'}
-                    </p>
-                    {violation.detail && <p className="mt-1 text-rose-100/90">{violation.detail}</p>}
-                  </div>
-                ))}
+        {/* ── Regulatory compliance (full payload + legacy fallback) ──────── */}
+        <Section icon={<Landmark size={16} />} title="Regulatory Compliance">
+          {!reg ? (
+            <p className="text-sm text-slate-500">
+              No regulatory compliance block was returned for this passport.
+            </p>
+          ) : richRegulatory ? (
+            <div className="space-y-8">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 p-5 rounded-2xl border border-slate-700/80 bg-slate-900/40">
+                <div>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                    Aggregate compliance status
+                  </p>
+                  <RegulatoryAggregateBadge status={reg.status} />
+                  <p className="mt-3 text-xs text-slate-400">
+                    Use case:{' '}
+                    <span className="text-slate-200 font-semibold">
+                      {reg.use_case ?? passport.model_info.use_case}
+                    </span>
+                    {reg.evaluated_at && (
+                      <span className="ml-3 font-mono text-slate-500">
+                        · Evaluated {new Date(reg.evaluated_at).toLocaleString()}
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
+
+              {Array.isArray(reg.frameworks_overview) && reg.frameworks_overview.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <Landmark size={14} className="text-indigo-400" aria-hidden />
+                    Statutory frameworks
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {reg.frameworks_overview.map((fw, i) => (
+                      <FrameworkLensCard key={`${fw.role ?? 'fw'}-${i}`} card={fw} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {Array.isArray(reg.metric_evaluations) && reg.metric_evaluations.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <Gavel size={14} className="text-amber-400" aria-hidden />
+                    Per-group statutory checks
+                  </h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {reg.metric_evaluations.map((row, idx) => (
+                      <div
+                        key={`${row.protected_attribute ?? 'attr'}-${idx}`}
+                        className="rounded-2xl border border-slate-700/80 bg-slate-950/40 p-5 space-y-4 text-left flex flex-col"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                              Protected group
+                            </p>
+                            <p className="text-lg font-black text-white capitalize">
+                              {row.protected_attribute ?? '—'}
+                            </p>
+                          </div>
+                          <ComplianceRowBadge row={row} />
+                        </div>
+                        <div className="text-xs text-slate-400 space-y-1">
+                          <p>
+                            <span className="text-slate-500">Law:</span> {row.law_short}
+                          </p>
+                          {row.law_full && row.law_full !== row.law_short && (
+                            <p className="text-slate-500 leading-snug">{row.law_full}</p>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-xl bg-slate-900/60 border border-slate-800 p-3">
+                            <p className="text-[10px] font-black text-slate-500 uppercase">{row.metric_label}</p>
+                            <p className="text-xl font-mono font-black text-white">
+                              {typeof row.value === 'number' ? row.value.toFixed(4) : '—'}
+                            </p>
+                          </div>
+                          <div className="rounded-xl bg-slate-900/60 border border-slate-800 p-3">
+                            <p className="text-[10px] font-black text-slate-500 uppercase">Threshold</p>
+                            <p className="text-xl font-mono font-black text-indigo-300">
+                              {typeof row.threshold === 'number' ? row.threshold.toFixed(4) : '—'}
+                            </p>
+                          </div>
+                        </div>
+                        {row.severity && (
+                          <p className="text-[10px] uppercase font-bold text-slate-500">
+                            Severity tier: <span className="text-slate-300">{row.severity}</span>
+                          </p>
+                        )}
+                        <div className="space-y-2 text-sm flex-1">
+                          <p className="text-slate-200 leading-relaxed">
+                            <span className="font-black text-indigo-300/90 text-[10px] uppercase tracking-wide block mb-1">
+                              Explanation
+                            </span>
+                            {row.explanation}
+                          </p>
+                          <p className="text-slate-300 leading-relaxed border-t border-slate-800 pt-3">
+                            <span className="font-black text-emerald-300/80 text-[10px] uppercase tracking-wide block mb-1">
+                              Remediation
+                            </span>
+                            {row.remediation}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {Array.isArray(reg.violations) && reg.violations.length > 0 && (
+                  <div className="rounded-2xl border border-rose-500/25 bg-rose-500/5 p-5">
+                    <h4 className="text-xs font-black text-rose-300 uppercase tracking-widest mb-3">
+                      Engine findings
+                    </h4>
+                    <ul className="space-y-3">
+                      {reg.violations.map((violation, index) => (
+                        <li
+                          key={`v-${index}`}
+                          className="text-sm text-rose-100/90 border-b border-rose-500/10 last:border-0 pb-3 last:pb-0"
+                        >
+                          <span className="font-semibold text-white">{violation.attribute}</span>
+                          <span className="text-rose-200/80"> · {violation.metric}</span>
+                          <p className="text-xs mt-1 text-rose-200/80">{violation.detail}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(reg.remediation_steps) && reg.remediation_steps.length > 0 && (
+                  <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-5">
+                    <h4 className="text-xs font-black text-emerald-300 uppercase tracking-widest mb-3">
+                      Recommended actions
+                    </h4>
+                    <ol className="list-decimal list-inside space-y-2 text-sm text-slate-200 leading-relaxed">
+                      {reg.remediation_steps.map((step, i) => (
+                        <li key={i}>{step}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <LegacyRegulatorySnapshot
+              reg={reg}
+              hasViolation={hasViolation}
+              regLaw={regLaw}
+              regStatus={regStatus}
+              regMetricLabel={regMetricLabel}
+              regMetricValue={regMetricValue}
+              regThreshold={regThreshold}
+              regExplanation={regExplanation}
+              regRemediation={regRemediation}
+            />
+          )}
         </Section>
 
         {/* ── Proxy Risks ────────────────────────────────────────────────── */}

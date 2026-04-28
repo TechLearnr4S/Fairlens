@@ -189,6 +189,32 @@ export default function BiasSandbox() {
     );
   }
 
+  if (!targetColumn) {
+    return (
+      <AuditEmptyState
+        variant="missing-data"
+        title="Outcome column required"
+        description="Simulations need the prediction or decision column from your audit (the same field you chose as the target). Complete that step in the wizard, run the audit, then open the sandbox again."
+        compact
+        cta={{ label: 'Open audit setup', to: '/new-audit' }}
+        className="glass-panel rounded-3xl border-slate-700/50"
+      />
+    );
+  }
+
+  if (columns.length === 0) {
+    return (
+      <AuditEmptyState
+        variant="missing-data"
+        title="No dataset columns in session"
+        description="We don’t have column metadata for this job. Start a new audit from a CSV upload so the sandbox can build feature lists and mitigation options."
+        compact
+        cta={{ label: 'Upload dataset', to: '/new-audit' }}
+        className="glass-panel rounded-3xl border-slate-700/50"
+      />
+    );
+  }
+
   return (
     <div className="glass-panel p-8 bg-slate-900/40 border-slate-700/50 rounded-3xl overflow-hidden relative">
       <div className="flex items-center justify-between mb-10">

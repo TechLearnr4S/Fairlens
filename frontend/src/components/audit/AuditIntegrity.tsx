@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ShieldCheck, ShieldX, ShieldAlert,
   Lock, CheckCircle2, XCircle, Clock,
   Hash, Link2, KeyRound, Loader2,
-  ChevronDown, ChevronUp, AlertTriangle,
+  ChevronDown, ChevronUp, AlertTriangle, RefreshCw, X,
 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { FETCH_WITH_TIMEOUT_MS } from '../../utils/fetchWithTimeout';
+import { unwrapAuditBody } from '../../utils/auditEnvelope';
 import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -99,6 +101,8 @@ const normalizeVerifyReport = (data: VerifyResponse, jobId: string): VerifyRepor
   };
 };
 
+const VERIFY_TIMEOUT_HINT = `No response within ${FETCH_WITH_TIMEOUT_MS / 1000}s. Check that the API is running, then try again.`;
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function CheckIcon({ value }: { value: boolean | null }) {
@@ -179,52 +183,72 @@ function StepRow({ step, index }: { step: VerifyStep; index: number }) {
 export default function AuditIntegrity() {
   const { jobId } = useAuditStore();
 
-  const [report, setReport]         = useState<VerifyReport | null>(null);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState<string | null>(null);
-  const [verifiedAt, setVerifiedAt] = useState<string | null>(null);
-  const [showSteps, setShowSteps]   = useState(false);
+  const [report, setReport]           = useState<VerifyReport | null>(null);
+  const [verifying, setVerifying]     = useState(false);
+  const [tampering, setTampering]     = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [tamperError, setTamperError] = useState<string | null>(null);
+  const [tamperSuccessBanner, setTamperSuccessBanner] = useState<string | null>(null);
+  const [showTamperConfirm, setShowTamperConfirm]     = useState(false);
+  const [verifiedAt, setVerifiedAt]   = useState<string | null>(null);
+  const [showSteps, setShowSteps]     = useState(false);
 
-  const runVerification = async () => {
+  const busy = verifying || tampering;
+
+  const runVerification = useCallback(async () => {
     if (!jobId) return;
-    setLoading(true);
-    setError(null);
+    setVerifying(true);
+    setVerifyError(null);
     setReport(null);
 
     try {
       const res = await apiFetch(`http://localhost:8000/audits/${jobId}/verify`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       let data: VerifyResponse;
-      try { data = await res.json(); } catch { throw new Error('Invalid JSON response'); }
+      try { data = unwrapAuditBody(await res.json()); } catch { throw new Error('Invalid JSON response'); }
       setReport(normalizeVerifyReport(data, jobId));
       setVerifiedAt(new Date().toLocaleString());
     } catch (e: unknown) {
-      if (!isRequestTimeout(e)) {
-        setError(e instanceof Error ? e.message : 'Unknown error');
+      if (isRequestTimeout(e)) {
+        setVerifyError(VERIFY_TIMEOUT_HINT);
+      } else {
+        setVerifyError(e instanceof Error ? e.message : 'Unknown error');
       }
     } finally {
-      setLoading(false);
+      setVerifying(false);
     }
+  }, [jobId]);
+
+  const openTamperConfirm = () => {
+    if (!jobId || busy) return;
+    setTamperError(null);
+    setTamperSuccessBanner(null);
+    setShowTamperConfirm(true);
   };
 
-  const handleTamper = async () => {
+  const cancelTamperConfirm = () => setShowTamperConfirm(false);
+
+  const executeTamper = useCallback(async () => {
     if (!jobId) return;
-    if (!window.confirm("Warning: This will maliciously modify the local database to show integrity failure. Proceed?")) return;
-    
-    setLoading(true);
+    setShowTamperConfirm(false);
+    setTampering(true);
+    setTamperError(null);
+    setTamperSuccessBanner(null);
     try {
       const res = await apiFetch(`http://localhost:8000/audits/${jobId}/tamper`, { method: 'POST' });
-      if (!res.ok) throw new Error("Tamper simulation failed");
-      alert("Tampering complete. The hash chain has been broken.");
-      runVerification(); // Refresh the status
+      if (!res.ok) throw new Error('Tamper simulation failed');
+      setTamperSuccessBanner('Tampering complete. The local audit hash chain was modified for demonstration.');
+      await runVerification();
     } catch (e: unknown) {
-      if (!isRequestTimeout(e)) {
-        alert(e instanceof Error ? e.message : 'Unknown error');
+      if (isRequestTimeout(e)) {
+        setTamperError(VERIFY_TIMEOUT_HINT);
+      } else {
+        setTamperError(e instanceof Error ? e.message : 'Unknown error');
       }
     } finally {
-      setLoading(false);
+      setTampering(false);
     }
-  };
+  }, [jobId, runVerification]);
 
   const isValid   = report?.is_valid ?? null;
   const hasReport = report !== null;
@@ -258,25 +282,31 @@ export default function AuditIntegrity() {
         <div className="flex items-center gap-2 flex-wrap print:hidden">
           <button
             id="tamper-simulation-btn"
-            onClick={handleTamper}
-            disabled={loading || !jobId}
+            type="button"
+            onClick={openTamperConfirm}
+            disabled={busy || !jobId}
             className={`
               flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-black
               transition-all border bg-slate-900/50 border-rose-500/30 text-rose-400 hover:bg-rose-500/10
-              ${(loading || !jobId) ? 'opacity-50 cursor-not-allowed' : ''}
+              ${(busy || !jobId) ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
-            <AlertTriangle size={14} /> Simulate Tampering
+            {tampering ? (
+              <><Loader2 size={14} className="animate-spin" /> Applying…</>
+            ) : (
+              <><AlertTriangle size={14} /> Simulate Tampering</>
+            )}
           </button>
 
           <button
             id="verify-audit-trail-btn"
-            onClick={runVerification}
-            disabled={loading || !jobId}
+            type="button"
+            onClick={() => void runVerification()}
+            disabled={busy || !jobId}
             className={`
               flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-black
               transition-all duration-200 border
-              ${loading
+              ${busy
                 ? 'bg-slate-800 border-slate-700 text-slate-400 cursor-not-allowed'
                 : !jobId
                 ? 'bg-slate-800/50 border-slate-700/50 text-slate-600 cursor-not-allowed'
@@ -284,13 +314,107 @@ export default function AuditIntegrity() {
               }
             `}
           >
-            {loading
+            {verifying
               ? <><Loader2 size={16} className="animate-spin" /> Verifying…</>
               : <><ShieldCheck size={16} /> Verify Audit Trail</>
             }
           </button>
         </div>
       </div>
+
+      {showTamperConfirm && jobId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tamper-confirm-title"
+          className="mb-6 p-5 rounded-2xl border border-rose-500/35 bg-rose-950/40 text-left space-y-4 print:hidden"
+        >
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/25 flex items-center justify-center">
+              <AlertTriangle className="text-rose-400" size={20} aria-hidden />
+            </div>
+            <div className="min-w-0 space-y-2">
+              <h3 id="tamper-confirm-title" className="text-sm font-black text-rose-100 uppercase tracking-wide">
+                Confirm tamper simulation
+              </h3>
+              <p className="text-sm text-rose-200/90 leading-relaxed">
+                This will intentionally modify stored audit data so the hash chain fails verification—only for
+                learning how integrity checks behave. Do not use on production data you need to preserve.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 justify-end">
+            <button
+              type="button"
+              onClick={cancelTamperConfirm}
+              className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-600 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void executeTamper()}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-black bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50 shadow-lg shadow-rose-900/20 transition-colors"
+            >
+              <AlertTriangle size={14} /> Confirm &amp; tamper
+            </button>
+          </div>
+        </div>
+      )}
+
+      {tamperSuccessBanner && jobId && (
+        <div className="mb-6 flex items-start gap-3 p-4 rounded-2xl border border-emerald-500/35 bg-emerald-500/10 text-left print:hidden">
+          <CheckCircle2 className="text-emerald-400 shrink-0 mt-0.5" size={20} aria-hidden />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-emerald-100">{tamperSuccessBanner}</p>
+            <p className="text-xs text-slate-400 mt-1">Results below refresh from the verifier.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTamperSuccessBanner(null)}
+            className="shrink-0 p-1.5 rounded-lg text-emerald-400/80 hover:bg-emerald-500/15 hover:text-emerald-200 transition-colors"
+            aria-label="Dismiss"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
+      {tamperError && jobId && (
+        <div
+          role="alert"
+          className="mb-6 p-4 rounded-2xl border border-rose-500/35 bg-rose-500/10 text-left space-y-3 print:hidden"
+        >
+          <p className="text-sm text-rose-100 flex items-start gap-2">
+            <AlertTriangle className="text-rose-400 shrink-0 mt-0.5" size={16} aria-hidden />
+            <span>{tamperError}</span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void executeTamper()}
+              disabled={busy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 border border-rose-500/40 disabled:opacity-50"
+            >
+              <RefreshCw size={14} /> Retry tamper
+            </button>
+            <button
+              type="button"
+              onClick={() => setTamperError(null)}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {jobId && !hasReport && verifying && (
+        <div className="flex items-center gap-3 p-4 mb-4 rounded-xl border border-indigo-500/25 bg-indigo-500/10 text-indigo-100 text-sm print:hidden">
+          <Loader2 className="animate-spin shrink-0 text-indigo-400" size={18} aria-hidden />
+          <span>Verifying hash chain and signatures…</span>
+        </div>
+      )}
 
       {!jobId && !hasReport && (
         <AuditEmptyState
@@ -302,24 +426,24 @@ export default function AuditIntegrity() {
         />
       )}
 
-      {jobId && error && !hasReport && (
+      {jobId && verifyError && !hasReport && !verifying && (
         <AuditEmptyState
           variant="failed-api"
           title="Verification request failed"
-          description={error}
-          onRetry={runVerification}
+          description={verifyError}
+          onRetry={() => void runVerification()}
           retryLabel="Try verification again"
           compact
           className="my-4"
         />
       )}
 
-      {jobId && !hasReport && !loading && !error && (
+      {jobId && !hasReport && !verifying && !verifyError && (
         <AuditEmptyState
           variant="missing-data"
           title="Audit trail not verified yet"
           description="Compute hash-chain validity for your job’s persisted steps."
-          cta={{ label: 'Verify audit trail', onClick: runVerification }}
+          cta={{ label: 'Verify audit trail', onClick: () => void runVerification() }}
           icon={ShieldAlert}
           compact
           className="my-4 border border-slate-700/60"

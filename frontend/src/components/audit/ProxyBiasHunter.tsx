@@ -25,6 +25,7 @@ import CorrelationHeatmap from './CorrelationHeatmap';
 import ProxyRiskBarChart from './ProxyRiskBarChart';
 import ProxyNetworkGraph from './ProxyNetworkGraph';
 import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { unwrapAuditBody } from '../../utils/auditEnvelope';
 import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 export default function ProxyBiasHunter() {
@@ -59,7 +60,11 @@ export default function ProxyBiasHunter() {
           target_column: targetColumn
         })
       });
-      const data = await res.json();
+      const data = unwrapAuditBody<{
+        status: string;
+        proxy_risks: { risk_level?: string; feature?: string; score?: number }[];
+        correlation_matrix: unknown;
+      }>(await res.json());
       if (data.status === 'success') {
         setProxyRisks(data.proxy_risks);
         setCorrelationMatrix(data.correlation_matrix);
@@ -114,6 +119,22 @@ export default function ProxyBiasHunter() {
           title="Protected attributes required"
           description="Choose at least one sensitive attribute during audit setup so we can estimate proxy leakage."
           cta={{ label: 'Configure audit', to: '/new-audit' }}
+          className="glass-panel"
+        />
+      </div>
+    );
+  }
+
+  if (!targetColumn) {
+    return (
+      <div className="space-y-6">
+        <AuditEmptyState
+          variant="missing-data"
+          title="Prediction column not selected"
+          description={
+            'Proxy analysis ties candidate features to your outcome and sensitive groups. Choose the column your system predicts or decides (e.g. approval, score, label) in the audit wizard’s target step, then return here to run detection.'
+          }
+          cta={{ label: 'Set target column', to: '/new-audit' }}
           className="glass-panel"
         />
       </div>

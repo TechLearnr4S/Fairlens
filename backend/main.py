@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 import asyncio
 import concurrent.futures
 from datetime import datetime
@@ -34,7 +34,11 @@ from governance import (
 from verdict_builder import build_verdict
 from fairness_evaluator import StatisticallyRigorousEvaluator
 from bias_simulator import simulate_mitigation_enhanced, optimize_fairness, generate_recommendation
-from correlation_engine import run_correlation_analysis, compute_proxy_risk
+from correlation_engine import (
+    run_correlation_analysis,
+    compute_proxy_risk,
+    compute_numeric_feature_correlation_matrix,
+)
 from firebase_client import (
     download_dataset_as_dataframe,
     get_audit_config,
@@ -43,7 +47,7 @@ from firebase_client import (
     save_proxy_explanation,
 )
 from services.agent_orchestrator import run_fairness_copilot
-from audit_log import append_audit_log, get_audit_chain, verify_chain, run_verification_engine
+from audit_log import append_audit_log, get_audit_chain, run_verification_engine
 from signing import get_public_key_pem, get_public_key_hex
 from cache import cache_get, cache_set, cache_stats
 from validation import validate_dataset, validate_audit_config, sanitize_string
@@ -51,6 +55,7 @@ from policy_engine import PolicyEngine, PolicyViolationException
 from model_ingestion import register_model_routes
 
 from datastore import FirestoreBackedDict
+from audit_envelope import audit_success
 
 # Firestore-backed datastore — survives server restarts.
 # Falls back to memory-only if Firestore is unavailable.
@@ -207,13 +212,15 @@ async def upload_dataset(file: UploadFile = File(...)):
         "columns": list(df.columns)
     })
     
-    return {
-        "job_id": job_id,
-        "columns": columns,
-        "column_types": column_types,
-        "preview": df.head(10).fillna("-").to_dict(orient="records"),
-        "file_url": "local_storage"
-    }
+    return audit_success(
+        {
+            "job_id": job_id,
+            "columns": columns,
+            "column_types": column_types,
+            "preview": df.head(10).fillna("-").to_dict(orient="records"),
+            "file_url": "local_storage",
+        }
+    )
 
 class AuditRunRequest(BaseModel):
     target_column: str
@@ -259,7 +266,7 @@ async def save_audit_config(payload: AuditConfigRequest):
             "config_saved_at":      datetime.utcnow().isoformat() + "Z",
         })
     ).start()
-    return {"status": "ok", "job_id": payload.job_id}
+    return audit_success({"status": "ok", "job_id": payload.job_id})
 
 class SimulationRequest(BaseModel):
     method: str
@@ -296,7 +303,7 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
     cached = cache_get(job_id, "audit_run", cache_params)
     if cached:
         logger.info("AUDIT_RUN cache hit | job_id=%s", job_id)
-        return cached
+        return audit_success(cached)
 
     try:
         # Run fairness + proxy detection concurrently
@@ -387,7 +394,7 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
 
         logger.info("AUDIT_RUN END | job_id=%s disparities=%d proxies=%d",
                     job_id, len(disparities), len(proxies))
-        return result
+        return audit_success(result)
 
     except Exception as e:
         logger.error("AUDIT_RUN FAILED | job_id=%s error=%s", job_id, e)
@@ -714,6 +721,29 @@ async def get_passport(job_id: str):
 # Hash-Chained Audit Logs
 # ---------------------------------------------------------------------------
 
+
+def _audit_verification_report(job_id: str) -> dict[str, Any]:
+    """
+    Single source of truth for audit chain verification (Firestore-backed chain).
+
+    Schema matches ``run_verification_engine`` and the AuditIntegrity UI expectations.
+    """
+    try:
+        return run_verification_engine(job_id)
+    except Exception as e:
+        logger.error("Verification engine failed for job_id=%s: %s", job_id, e)
+        return {
+            "is_valid": False,
+            "broken_at": None,
+            "total_entries": 0,
+            "checks_passed": 0,
+            "checks_failed": 0,
+            "steps": [],
+            "failure": {"reason": str(e)},
+            "summary": f"Verification engine error: {e}",
+        }
+
+
 @app.get("/audits/{job_id}/logs")
 async def get_audit_logs(job_id: str):
     """
@@ -733,15 +763,43 @@ async def get_audit_logs(job_id: str):
 @app.get("/audits/{job_id}/logs/verify")
 async def verify_audit_logs(job_id: str):
     """
-    Quick chain integrity check (uses verify_chain — returns compact summary).
-    For the detailed per-step report, use GET /audits/{job_id}/verify.
+    Compact verification summary — same semantics as ``GET /audits/{job_id}/verify``.
+
+    Returned fields intentionally overlap legacy ``verify_chain`` summaries
+    (*valid*, *total*) while mirroring canonical names (*is_valid*, *total_entries*)
+    used by ``/verify``.
     """
-    chain = get_audit_chain(job_id)
-    result = verify_chain(chain)
-    return {
-        "job_id": job_id,
-        **result,
-    }
+    report = _audit_verification_report(job_id)
+    is_valid = bool(report.get("is_valid"))
+    total_entries = int(report.get("total_entries") or 0)
+
+    legacy_reason = None
+    if report.get("failure") and isinstance(report["failure"], dict):
+        legacy_reason = report["failure"].get("reason")
+
+    sig_ok = True
+    for step in report.get("steps") or []:
+        checks = step.get("checks") or {}
+        if checks.get("signature_valid") is False:
+            sig_ok = False
+            break
+
+    return audit_success(
+        {
+            "job_id": job_id,
+            "compact": True,
+            "valid": is_valid,
+            "is_valid": is_valid,
+            "total": total_entries,
+            "total_entries": total_entries,
+            "broken_at": report.get("broken_at"),
+            "reason": legacy_reason if legacy_reason else (None if is_valid else report.get("summary")),
+            "signature_verified": sig_ok,
+            "summary": report.get("summary"),
+            "checks_passed": report.get("checks_passed"),
+            "checks_failed": report.get("checks_failed"),
+        }
+    )
 
 
 @app.get("/audits/{job_id}/verify")
@@ -756,34 +814,19 @@ async def verify_audit_integrity(job_id: str):
 
     Returns a structured report:
       {
-        "is_valid":      bool,         // overall pass/fail
-        "broken_at":     int | null,   // index of first failure
+        "job_id":        str,
+        "is_valid":      bool,         # overall pass/fail
+        "broken_at":     int | null,   # index of first failure
         "total_entries": int,
         "checks_passed": int,
         "checks_failed": int,
-        "steps":         [...],        // per-entry check detail
-        "failure":       {...} | null, // detail of first broken entry
+        "steps":         [...],        # per-entry check detail
+        "failure":       {...} | null,
         "summary":       str
       }
     """
-    try:
-        report = run_verification_engine(job_id)
-    except Exception as e:
-        logger.error("Verification engine failed for job_id=%s: %s", job_id, e)
-        report = {
-            "is_valid": False,
-            "broken_at": None,
-            "total_entries": 0,
-            "checks_passed": 0,
-            "checks_failed": 0,
-            "steps": [],
-            "failure": {"reason": str(e)},
-            "summary": f"Verification engine error: {e}",
-        }
-    return {
-        "job_id": job_id,
-        **report,
-    }
+    report = _audit_verification_report(job_id)
+    return audit_success({"job_id": job_id, **report})
 
 
 @app.get("/audit-logs/public-key")
@@ -961,11 +1004,13 @@ async def compute_correlations(job_id: str, payload: CorrelationRequest):
         LOCAL_DATASTORE[job_id]["results"]["correlations"] = correlation_results
         LOCAL_DATASTORE.sync(job_id)
 
-        return {
-            "status": "success",
-            "job_id": job_id,
-            "correlations": correlation_results,
-        }
+        return audit_success(
+            {
+                "status": "success",
+                "job_id": job_id,
+                "correlations": correlation_results,
+            }
+        )
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as exc:
@@ -986,13 +1031,15 @@ async def get_proxy_risks(job_id: str, payload: CorrelationRequest):
         {
           "status": "success",
           "job_id": "...",
-          "proxy_risks": [
-            { "feature": "zip_code", "score": 0.72, "risk_level": "High",
-              "is_proxy": true, "type": "categorical", "method": "mi",
-              "max_protected": "race" },
-            ...
-          ]
+          "proxy_risks": [ ...ranked proxy-risk rows... ],
+          "correlation_matrix": {
+             "associations": {protected_attr: {feature: {type, correlation_score, method}}},
+             "pearson": {"columns": [...], "matrix": [[float|null]], "method": "pearson"}
+          }
         }
+
+    ``associations`` retains the nested structure consumed by Proxy Bias Hunter heatmaps;
+    ``pearson`` is a numeric pairwise feature–feature Pearson matrix (excluding protected + target columns).
     """
     if job_id not in LOCAL_DATASTORE:
         raise HTTPException(status_code=404, detail="Dataset not found. Upload a CSV first.")
@@ -1025,16 +1072,29 @@ async def get_proxy_risks(job_id: str, payload: CorrelationRequest):
         # Derive ranked proxy-risk list
         proxy_risks = compute_proxy_risk(correlation_results)
 
+        excluded = set(payload.protected_attributes)
+        if payload.target_column:
+            excluded.add(payload.target_column)
+        pearson_block = compute_numeric_feature_correlation_matrix(df, excluded=excluded)
+
+        correlation_matrix_payload = {
+            "associations": correlation_results,
+            "pearson": pearson_block,
+        }
+
         # Persist for downstream endpoints (passport, explain)
         LOCAL_DATASTORE[job_id]["results"]["proxy_risks"] = proxy_risks
+        LOCAL_DATASTORE[job_id]["results"]["correlation_matrix_bundle"] = correlation_matrix_payload
         LOCAL_DATASTORE.sync(job_id)
 
-        return {
-            "status": "success",
-            "job_id": job_id,
-            "proxy_risks": proxy_risks,
-            "correlation_matrix": correlation_results,
-        }
+        return audit_success(
+            {
+                "status": "success",
+                "job_id": job_id,
+                "proxy_risks": proxy_risks,
+                "correlation_matrix": correlation_matrix_payload,
+            }
+        )
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as exc:

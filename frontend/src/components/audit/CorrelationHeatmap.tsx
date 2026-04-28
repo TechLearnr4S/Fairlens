@@ -1,16 +1,21 @@
 import React from 'react';
 import { HelpCircle } from 'lucide-react';
+import { unwrapProxyCorrelationHeatmap } from '../../utils/unwrapCorrelationMatrix';
 
 interface HeatmapProps {
-  matrix: Record<string, Record<string, any>>;
+  /** Nested protected→feature map, or `{ associations }` wrapper from `/proxy-risks`. */
+  matrix: unknown;
 }
 
 export default function CorrelationHeatmap({ matrix }: HeatmapProps) {
+  const hm = unwrapProxyCorrelationHeatmap(matrix);
   // protected_attr -> { feature -> info }
-  const protectedAttrs = Object.keys(matrix);
+  if (!hm) return null;
+
+  const protectedAttrs = Object.keys(hm);
   if (protectedAttrs.length === 0) return null;
 
-  const features = Object.keys(matrix[protectedAttrs[0]]);
+  const features = Object.keys(hm[protectedAttrs[0]]);
 
   const getColor = (score: number) => {
     if (score > 0.5) return 'bg-rose-500 text-white'; // High Risk
@@ -65,8 +70,9 @@ export default function CorrelationHeatmap({ matrix }: HeatmapProps) {
                 
                 {/* Score Cells */}
                 {protectedAttrs.map(attr => {
-                  const score = matrix[attr][feat]?.correlation_score || 0;
-                  const method = matrix[attr][feat]?.method || 'N/A';
+                  const cell = hm[attr]?.[feat] as { correlation_score?: number; method?: string } | undefined;
+                  const score = cell?.correlation_score ?? 0;
+                  const method = cell?.method ?? 'N/A';
                   
                   return (
                     <div 

@@ -1,9 +1,10 @@
 import { useMemo, useRef, useEffect, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { Share2, Maximize2, Move } from 'lucide-react';
+import { unwrapProxyCorrelationHeatmap } from '../../utils/unwrapCorrelationMatrix';
 
 interface ProxyNetworkGraphProps {
-  matrix: Record<string, Record<string, any>>;
+  matrix: unknown;
 }
 
 export default function ProxyNetworkGraph({ matrix }: ProxyNetworkGraphProps) {
@@ -20,10 +21,13 @@ export default function ProxyNetworkGraph({ matrix }: ProxyNetworkGraphProps) {
   }, []);
 
   const graphData = useMemo(() => {
-    const protectedAttrs = Object.keys(matrix);
+    const hm = unwrapProxyCorrelationHeatmap(matrix);
+    if (!hm) return { nodes: [], links: [] };
+
+    const protectedAttrs = Object.keys(hm);
     if (protectedAttrs.length === 0) return { nodes: [], links: [] };
     
-    const features = Object.keys(matrix[protectedAttrs[0]]);
+    const features = Object.keys(hm[protectedAttrs[0]]);
     const nodes: any[] = [];
     const links: any[] = [];
     
@@ -47,8 +51,8 @@ export default function ProxyNetworkGraph({ matrix }: ProxyNetworkGraphProps) {
       const featLinks: any[] = [];
 
       protectedAttrs.forEach(attr => {
-        const info = matrix[attr][feat];
-        const score = info?.correlation_score || 0;
+        const info = hm[attr]?.[feat] as { correlation_score?: number } | undefined;
+        const score = info?.correlation_score ?? 0;
         
         if (score >= THRESHOLD) {
           featLinks.push({

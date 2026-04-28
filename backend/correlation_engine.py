@@ -220,6 +220,63 @@ def compute_proxy_risk(
     return ranked
 
 
+def compute_numeric_feature_correlation_matrix(
+    df: pd.DataFrame,
+    *,
+    excluded: set[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Pairwise Pearson correlation matrix among **numeric** feature columns only.
+
+    Excludes protected columns, target column, etc. Caller passes ``excluded``.
+    Rows with insufficient variance yield NaNs in pandas; emitted as JSON null.
+
+    Returns
+    -------
+    dict
+        ``{"columns": [str, ...], "matrix": [[float | null, ...], ...], "method": "pearson"}``
+    """
+    exclude = set(excluded or ())
+    feats = [c for c in df.columns if c not in exclude]
+
+    if not feats:
+        return {"columns": [], "matrix": [], "method": "pearson"}
+
+    work_df = df[feats].copy()
+    if len(work_df) > _SAMPLE_LIMIT:
+        work_df = work_df.sample(_SAMPLE_LIMIT, random_state=42)
+    work_df = _impute(work_df)
+
+    numeric_cols = []
+    for c in feats:
+        if not pd.api.types.is_numeric_dtype(work_df[c].dtype):
+            continue
+        nz = work_df[c].dropna()
+        # Need at least two finite points and nonzero variance for meaningful r
+        if len(nz) < 2 or float(nz.std()) == 0.0:
+            continue
+        numeric_cols.append(c)
+
+    if len(numeric_cols) < 2:
+        return {"columns": numeric_cols, "matrix": [], "method": "pearson"}
+
+    sub = work_df[numeric_cols]
+    cm = sub.corr(method="pearson")
+
+    cols = [str(x) for x in cm.columns.tolist()]
+
+    def _cell(v: Any) -> float | None:
+        if pd.isna(v):
+            return None
+        return round(float(v), 6)
+
+    matrix: list[list[float | None]] = []
+    for _, row in cm.iterrows():
+        matrix.append([_cell(row[c]) for c in cm.columns])
+
+    return {"columns": cols, "matrix": matrix, "method": "pearson"}
+
+
 def _classify_risk(score: float) -> str:
     """Map a normalised [0, 1] score to a human-readable risk label."""
     for threshold, label in _RISK_THRESHOLDS:

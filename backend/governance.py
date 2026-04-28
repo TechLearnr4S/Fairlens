@@ -13,6 +13,7 @@ Provides:
 
 import json
 import hashlib
+from collections.abc import Mapping
 from datetime import datetime, timezone
 
 
@@ -444,6 +445,87 @@ def compute_regulatory_compliance(
         "evaluated_at":      _now_iso(),
     }
 
+
+def passport_metric_evaluations(use_case: str, disparities: dict) -> list:
+    """
+    Per protected-attribute regulatory evaluation rows for Fairness Passport UI.
+
+    Uses :func:`evaluate_regulatory_risk` with the same metric key as
+    :func:`compute_regulatory_compliance` so narratives stay consistent.
+    """
+    if not isinstance(disparities, dict):
+        return []
+
+    canonical = _canonical_use_case(use_case)
+    fw = REGULATORY_FRAMEWORKS.get(canonical, REGULATORY_FRAMEWORKS["Other"])
+    pk = fw["metric"]
+
+    rows: list = []
+    for attr, data in disparities.items():
+        if not isinstance(data, Mapping):
+            continue
+        raw = _safe_float(data.get(pk) or data.get("disparity_score"))
+        ev = evaluate_regulatory_risk(pk, raw, use_case)
+        violation = bool(ev.get("violation"))
+        sev = str(ev.get("severity") or "").upper()
+        rev = (
+            "VIOLATION_DETECTED"
+            if violation
+            else ("REVIEW_REQUIRED" if sev in ("MEDIUM", "HIGH", "CRITICAL") else "COMPLIANT")
+        )
+        rows.append({
+            "protected_attribute": attr,
+            "law_short":             ev.get("law"),
+            "law_full":              ev.get("framework"),
+            "metric_label":          ev.get("metric"),
+            "metric_key":            ev.get("metric_key"),
+            "value":                 ev.get("value"),
+            "threshold":             ev.get("threshold"),
+            "violation":             violation,
+            "severity":              ev.get("severity"),
+            "compliance_status":     rev,
+            "explanation":           ev.get("explanation"),
+            "remediation":           ev.get("remediation"),
+        })
+
+    return rows
+
+
+def passport_frameworks_overview(use_case: str, primary_framework: dict) -> list:
+    """
+    Primary statutory lens for the selected use case plus a cross-reference baseline
+    (general AI fairness principles) for demo / governance storytelling.
+    """
+    canonical = _canonical_use_case(use_case)
+    headline = LAW_HEADLINE_BY_USE_CASE.get(
+        canonical,
+        primary_framework.get("name") or "Applicable fairness framework",
+    )
+    base = {
+        "role":    "primary",
+        "name":    primary_framework.get("name"),
+        "body":    primary_framework.get("body"),
+        "reference": primary_framework.get("reference"),
+        "summary": headline,
+        "use_case": canonical,
+    }
+
+    other = REGULATORY_FRAMEWORKS["Other"]
+    cross = {
+        "role":    "cross_reference",
+        "name":    other["law"],
+        "body":    other["body"],
+        "reference": other["reference"],
+        "summary": (
+            "Emerging cross-sector baseline for automated decision systems "
+            "(IEEE / EU AI Act–style proportionality)."
+        ),
+        "use_case": "Other",
+    }
+
+    return [base, cross]
+
+
 # ---------------------------------------------------------------------------
 
 def compute_risk_assessment(
@@ -853,11 +935,17 @@ def build_fairness_passport(job_id: str, data: dict) -> dict:
         disparities=disparities,
         proxies=proxies,
     )
+    uc_reg = config.get("use_case", "Other")
+    regulatory["metric_evaluations"] = passport_metric_evaluations(uc_reg, disparities)
+    regulatory["frameworks_overview"] = passport_frameworks_overview(
+        uc_reg,
+        regulatory.get("framework") or {},
+    )
 
     # --- Assemble Passport ---
     passport = {
         "job_id": job_id,
-        "schema_version": "2.1",
+        "schema_version": "2.2",
         "model_info": model_info,
         "fairness_summary": fairness_summary,
         "proxy_risks": formatted_proxies,

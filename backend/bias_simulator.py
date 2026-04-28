@@ -115,6 +115,9 @@ def generate_insight(before, after, method, threshold=0.5, feature=None):
                 insights.append("Stricter threshold reduced positive predictions")
             else:
                 insights.append("Modified threshold increased false positive noise")
+    elif method == "reweighing":
+        if disp_reduction > 0.01:
+            insights.append("Reweighing successfully balanced group representation during training")
     else:
         if disp_reduction > 0.01:
             insights.append(f"Removing '{feature}' successfully eliminated a source of proxy bias")
@@ -193,6 +196,27 @@ def simulate_mitigation_enhanced(job_id: str, df: pd.DataFrame, target_col: str,
             new_predictions = mod_pipeline.predict(X_mod)
             after_metrics = calculate_metrics(y, new_predictions, protected_attr_series)
             feature_used = feature_to_remove
+            
+        elif method == "reweighing":
+            # Reweighing computes sample weights W = (P(Target) * P(Group)) / P(Target AND Group)
+            # This equalizes representation across group-outcome combinations before training.
+            df_temp = pd.DataFrame({'target': y, 'group': protected_attr_series})
+            n_total = len(df_temp)
+            
+            p_t = df_temp.groupby('target').size() / n_total
+            p_g = df_temp.groupby('group').size() / n_total
+            p_tg = df_temp.groupby(['target', 'group']).size() / n_total
+            
+            df_temp['p_t'] = df_temp['target'].map(p_t)
+            df_temp['p_g'] = df_temp['group'].map(p_g)
+            df_temp['p_tg'] = pd.MultiIndex.from_arrays([df_temp['target'], df_temp['group']]).map(p_tg)
+            
+            sample_weights = (df_temp['p_t'] * df_temp['p_g'] / df_temp['p_tg']).fillna(1.0).values
+            
+            rw_pipeline = build_pipeline(X)
+            rw_pipeline.fit(X, y, classifier__sample_weight=sample_weights)
+            new_predictions = rw_pipeline.predict(X)
+            after_metrics = calculate_metrics(y, new_predictions, protected_attr_series)
             
         else:
             raise ValueError(f"Unknown simulation method: {method}")

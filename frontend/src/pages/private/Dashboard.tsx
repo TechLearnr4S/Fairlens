@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, UploadCloud, Users, FileLock, AlertTriangle } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -14,6 +14,7 @@ import BiasSandbox from '../../components/audit/BiasSandbox';
 import FairnessPassport from '../../components/audit/FairnessPassport';
 import AuditIntegrity from '../../components/audit/AuditIntegrity';
 import { ModelEvaluator } from '../../components/audit/ModelEvaluator';
+import ModelUploader from '../../components/audit/ModelUploader';
 
 export default function Dashboard() {
   const {
@@ -134,7 +135,8 @@ export default function Dashboard() {
                     </BarChart>
                   </ResponsiveContainer>
 
-                  {/* Accuracy */}
+                  {/* Accuracy — only shown when ground-truth labels are available */}
+                  {disparities[attr].subgroups.some((sg: any) => sg.accuracy != null) && (
                   <ResponsiveContainer height={200}>
                     <BarChart data={disparities[attr].subgroups} layout="vertical">
                       <XAxis type="number" domain={[0, 1]} hide />
@@ -147,6 +149,7 @@ export default function Dashboard() {
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
               </div>
             ))}
@@ -156,6 +159,7 @@ export default function Dashboard() {
         {/* Components */}
         <FairnessCopilot />
         <ProxyBiasHunter />
+        <ModelUploader />
         <ModelEvaluator />
         <BiasSandbox />
 
@@ -176,27 +180,98 @@ export default function Dashboard() {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      <header className="flex justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-indigo-400">
-            FairLens Studio
-          </h1>
-          <p className="text-slate-400">
-            Bias Audit and Responsible AI Governance
-          </p>
-        </div>
+  return <DashboardEmptyState />;
+}
 
-        <Link to="/new-audit" className="px-4 py-2 bg-indigo-500 text-white rounded-lg flex gap-2">
+// ── Recent Audits empty state ─────────────────────────────────────────────────
+
+function DashboardEmptyState() {
+  const { setJobId } = useAuditStore();
+  const [recentAudits, setRecentAudits] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('http://localhost:8000/audits/recent')
+      .then(r => r.ok ? r.json() : { audits: [] })
+      .then(d => setRecentAudits(d.audits || []))
+      .catch(() => setRecentAudits([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      {/* Header */}
+      <header className="flex justify-between items-start">
+        <div>
+          <h1 className="text-4xl font-black text-white tracking-tight">FairLens Studio</h1>
+          <p className="text-slate-400 mt-1 font-medium">AI Governance & Bias Audit Platform</p>
+        </div>
+        <Link to="/new-audit" className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20 hover:scale-105 active:scale-95">
           <UploadCloud size={18} /> New Audit
         </Link>
       </header>
 
-      <div className="text-center py-16 text-slate-500">
-        <Users size={48} className="mx-auto mb-4" />
-        No audits yet
-      </div>
+      {/* Recent Audits */}
+      {loading ? (
+        <div className="flex items-center justify-center py-16 text-slate-500 gap-3">
+          <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm font-medium">Checking Firestore for recent audits...</span>
+        </div>
+      ) : recentAudits.length > 0 ? (
+        <div className="space-y-4">
+          <h2 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em]">
+            Recent Audits — Restored from Cloud
+          </h2>
+          <div className="grid gap-3">
+            {recentAudits.map(a => (
+              <div
+                key={a.job_id}
+                className="glass-panel p-5 rounded-2xl flex items-center justify-between gap-4 hover:border-indigo-500/30 transition-all group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center shrink-0">
+                    <ShieldCheck size={18} className="text-indigo-400" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-white text-sm">{a.filename}</p>
+                    <p className="text-slate-500 text-xs mt-0.5">
+                      {a.row_count.toLocaleString()} rows
+                      {a.config?.target && <> · Target: <span className="text-indigo-400">{a.config.target}</span></>}
+                      {a.config?.protected?.length > 0 && <> · Protected: {a.config.protected.join(', ')}</>}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  {a.has_results && (
+                    <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-full">
+                      Results Available
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setJobId(a.job_id)}
+                    className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-xs font-black rounded-xl transition-all uppercase tracking-widest group-hover:border-indigo-500/60"
+                  >
+                    Resume
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="text-center py-20 space-y-4">
+          <div className="w-20 h-20 rounded-3xl bg-slate-800/50 flex items-center justify-center mx-auto border border-slate-700">
+            <Users size={32} className="text-slate-600" />
+          </div>
+          <div>
+            <p className="text-slate-400 font-bold">No audits yet</p>
+            <p className="text-slate-600 text-sm mt-1">Upload a CSV to start your first fairness audit</p>
+          </div>
+          <Link to="/new-audit" className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all mt-2">
+            <UploadCloud size={16} /> Start First Audit
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

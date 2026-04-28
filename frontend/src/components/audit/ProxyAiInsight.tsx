@@ -1,4 +1,3 @@
-import React from 'react';
 import { Sparkles, AlertTriangle, ShieldCheck, Zap, Info, ListTodo } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 

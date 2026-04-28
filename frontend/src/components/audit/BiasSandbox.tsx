@@ -10,21 +10,19 @@ import {
   ResponsiveContainer, 
   Cell,
   Legend,
-  LineChart,
   Line,
-  Scatter,
   ReferenceDot,
   ComposedChart,
   Label,
   AreaChart,
   Area
 } from 'recharts';
-import { Play, RotateCcw, ShieldAlert, Zap, TrendingUp, TrendingDown, Info, AlertCircle, ArrowRight } from 'lucide-react';
+import { Play, RotateCcw, ShieldAlert, Zap, TrendingUp, TrendingDown, Info, AlertCircle } from 'lucide-react';
 import { ToastContainer, type ToastType } from '../ui/Toast';
 
 export default function BiasSandbox() {
   const { jobId, simulation, setSimulation, isSimulating, setIsSimulating, columns, targetColumn, protectedAttributes } = useAuditStore();
-  const [method, setMethod] = useState<'threshold_adjustment' | 'feature_removal'>('threshold_adjustment');
+  const [method, setMethod] = useState<'threshold_adjustment' | 'feature_removal' | 'reweighing'>('threshold_adjustment');
   const [threshold, setThreshold] = useState(0.5);
   const [isDebouncing, setIsDebouncing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -75,9 +73,11 @@ export default function BiasSandbox() {
         signal: controller.signal,
         body: JSON.stringify({
           method,
-          params: method === 'threshold_adjustment' 
-            ? { threshold } 
-            : { feature: feature || removableFeatures[0] }
+          params: method === 'threshold_adjustment'
+            ? { threshold }
+            : method === 'feature_removal'
+            ? { feature: feature || removableFeatures[0] }
+            : {} // reweighing computes weights internally
         })
       });
       
@@ -228,10 +228,22 @@ export default function BiasSandbox() {
               onChange={(e) => setMethod(e.target.value as any)}
               className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none cursor-pointer ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              <option value="threshold_adjustment">Threshold Adjustment</option>
-              <option value="feature_removal">Feature Removal</option>
+              <option value="threshold_adjustment">Threshold Adjustment (Post-processing)</option>
+              <option value="reweighing">Reweighing (Pre-processing)</option>
+              <option value="feature_removal">Feature Removal (Pre-processing)</option>
             </select>
           </div>
+
+          {/* Reweighing info panel */}
+          {method === 'reweighing' && (
+            <div className="p-4 bg-teal-500/5 border border-teal-500/20 rounded-xl space-y-2">
+              <p className="text-[10px] font-black text-teal-400 uppercase tracking-widest">Pre-processing · Reweighing</p>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Rebalances sample weights using the formula <span className="font-mono text-teal-300">w = P(Y)×P(A)/P(Y,A)</span> so every group–outcome pair is equally represented before training.
+              </p>
+              <p className="text-[10px] text-slate-500 italic">No parameters required — click Run to apply.</p>
+            </div>
+          )}
 
           <div className={`space-y-4 transition-all duration-300 ${method !== 'threshold_adjustment' ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
             <div className="flex justify-between items-center">
@@ -617,7 +629,7 @@ export default function BiasSandbox() {
                         />
                         <Tooltip 
                           contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px' }}
-                          formatter={(value: any, name: string) => [name === 'threshold' ? value.toFixed(2) : `${(value * 100).toFixed(1)}%`, name]}
+                          formatter={(value: any, name: unknown) => [typeof value === 'number' && String(name) !== 'threshold' ? `${(value * 100).toFixed(1)}%` : String(value), String(name)]}
                         />
                         <Line 
                           type="monotone" 
@@ -654,3 +666,5 @@ export default function BiasSandbox() {
     </div>
   );
 }
+
+

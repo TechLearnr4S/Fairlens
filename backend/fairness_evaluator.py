@@ -113,18 +113,39 @@ class StatisticallyRigorousEvaluator:
         }
 
     def _compute_bootstrapped_cis(self) -> Dict[str, Any]:
-        # Simplified bootstrap for performance
         n = len(self.df)
-        boot_results = []
-        for _ in range(self.bootstrap_samples):
-            boot_df = self.df.sample(n, replace=True)
-            boot_results.append(self._compute_metrics(boot_df))
+        tpr_gaps = []
+        fpr_gaps = []
+        sr_gaps = []
         
-        # Aggregate CIs
-        # For this demo, we'll return a stub for key metrics
+        # Deterministic seed for reproducible CIs
+        rng = np.random.RandomState(42)
+        
+        for _ in range(self.bootstrap_samples):
+            # Efficient sampling using numpy
+            indices = rng.choice(n, size=n, replace=True)
+            boot_df = self.df.iloc[indices].copy()
+            m = self._compute_metrics(boot_df)
+            tpr_gaps.append(m["disparities"]["tpr_gap"])
+            fpr_gaps.append(m["disparities"]["fpr_gap"])
+            sr_gaps.append(m["disparities"]["sr_gap"])
+        
+        alpha = self.policy.get("alpha", 0.05)
+        lower_pct = (alpha / 2) * 100
+        upper_pct = (1 - alpha / 2) * 100
+        
+        def compute_ci(arr):
+            if not arr:
+                return [0.0, 0.0]
+            return [
+                round(float(np.percentile(arr, lower_pct)), 4),
+                round(float(np.percentile(arr, upper_pct)), 4)
+            ]
+            
         return {
-            "tpr_gap": [0.05, 0.15], # Example
-            "fpr_gap": [0.02, 0.08]
+            "tpr_gap": compute_ci(tpr_gaps),
+            "fpr_gap": compute_ci(fpr_gaps),
+            "sr_gap": compute_ci(sr_gaps)
         }
 
     def _compute_significance(self, groups: Dict) -> Dict[str, Any]:

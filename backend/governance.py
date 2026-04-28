@@ -39,7 +39,155 @@ def _now_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. Intelligent Risk Scoring
+# Regulatory Mapping — Legal Compliance Layer
+# ---------------------------------------------------------------------------
+# Maps each use-case to the applicable law, threshold metric, and remediation.
+# This turns a disparity score into a legal finding.
+
+REGULATORY_FRAMEWORKS: dict = {
+    "Hiring": {
+        "law":       "EEOC Uniform Guidelines on Employee Selection Procedures — 4/5ths (80%) Rule",
+        "body":      "U.S. Equal Employment Opportunity Commission",
+        "metric":    "disparate_impact_ratio",
+        "threshold": 0.80,
+        "violation": (
+            "The selection rate for the minority group is below 80% of the majority group's rate, "
+            "indicating potential adverse impact under the EEOC 4/5ths Rule."
+        ),
+        "remediation": (
+            "Document business necessity for the selection criterion, or modify procedures to "
+            "reduce adverse impact. Consider alternative methods with equivalent validity."
+        ),
+        "reference": "29 CFR Part 1607",
+    },
+    "Credit Scoring": {
+        "law":       "Equal Credit Opportunity Act (ECOA) / Fair Housing Act (FHA)",
+        "body":      "Consumer Financial Protection Bureau (CFPB)",
+        "metric":    "tpr_gap",
+        "threshold": 0.10,
+        "violation": (
+            "True positive rate gap exceeds 10% across protected groups, suggesting potential "
+            "disparate impact in credit decisions under ECOA."
+        ),
+        "remediation": (
+            "Review underwriting model features for disparate impact on protected classes. "
+            "Consider alternative data sources or calibration across demographic groups."
+        ),
+        "reference": "15 U.S.C. § 1691",
+    },
+    "Healthcare": {
+        "law":       "ACA Section 1557 — Non-Discrimination in Health Programs and Activities",
+        "body":      "U.S. Department of Health and Human Services (HHS)",
+        "metric":    "fpr_gap",
+        "threshold": 0.05,
+        "violation": (
+            "False positive rate gap exceeds 5% across demographic groups, indicating potential "
+            "discrimination in healthcare decisions under ACA Section 1557."
+        ),
+        "remediation": (
+            "Conduct clinical validation of the algorithm across all demographic subgroups. "
+            "Engage an independent auditor before clinical deployment."
+        ),
+        "reference": "42 U.S.C. § 18116",
+    },
+    "Criminal Justice": {
+        "law":       "Equal Protection Clause — 14th Amendment / ProPublica COMPAS Standards",
+        "body":      "U.S. Department of Justice",
+        "metric":    "fpr_gap",
+        "threshold": 0.10,
+        "violation": (
+            "False positive rate gap exceeds 10% across racial groups, consistent with the "
+            "disparate error rate documented in risk assessment tools like COMPAS."
+        ),
+        "remediation": (
+            "Recalibrate recidivism score thresholds independently for each demographic group. "
+            "Implement mandatory human review before any detention decisions."
+        ),
+        "reference": "U.S. Const. amend. XIV",
+    },
+    "Other": {
+        "law":       "General AI Fairness Principles (EU AI Act / IEEE Ethically Aligned Design)",
+        "body":      "European Commission / IEEE",
+        "metric":    "disparity_score",
+        "threshold": 0.20,
+        "violation": (
+            "Disparity score exceeds 20%, suggesting meaningful bias in automated decisions "
+            "that may conflict with emerging AI fairness regulations."
+        ),
+        "remediation": (
+            "Conduct a full bias audit with domain experts. Apply appropriate mitigation "
+            "before deployment. Document all findings for regulatory compliance."
+        ),
+        "reference": "EU AI Act Art. 10 / IEEE P7003",
+    },
+}
+
+
+def compute_regulatory_compliance(
+    use_case: str,
+    disparities: dict,
+    proxies: list,
+) -> dict:
+    """
+    Evaluate audit results against the applicable regulatory framework for the use-case.
+
+    Returns a compliance dict with:
+      - framework: law name, body, reference
+      - status: "COMPLIANT" | "REVIEW_REQUIRED" | "VIOLATION_DETECTED"
+      - violations: list of specific findings
+      - remediation_steps: ordered list of actions
+    """
+    fw = REGULATORY_FRAMEWORKS.get(use_case, REGULATORY_FRAMEWORKS["Other"])
+    metric = fw["metric"]
+    threshold = fw["threshold"]
+
+    violations = []
+    for attr, data in disparities.items():
+        score = _safe_float(data.get(metric) or data.get("disparity_score"))
+        if metric == "disparate_impact_ratio":
+            # Lower is worse for disparate impact ratio
+            if score > 0 and score < threshold:
+                violations.append({
+                    "attribute": attr,
+                    "metric":    metric,
+                    "value":     round(score, 4),
+                    "threshold": threshold,
+                    "detail":    fw["violation"],
+                })
+        else:
+            # Higher gap is worse for tpr_gap / fpr_gap / disparity_score
+            if score > threshold:
+                violations.append({
+                    "attribute": attr,
+                    "metric":    metric,
+                    "value":     round(score, 4),
+                    "threshold": threshold,
+                    "detail":    fw["violation"],
+                })
+
+    if violations:
+        status = "VIOLATION_DETECTED"
+    elif any(
+        _safe_float(d.get("disparity_score")) > threshold * 0.7
+        for d in disparities.values()
+    ):
+        status = "REVIEW_REQUIRED"
+    else:
+        status = "COMPLIANT"
+
+    return {
+        "framework": {
+            "name":      fw["law"],
+            "body":      fw["body"],
+            "reference": fw["reference"],
+        },
+        "use_case":          use_case,
+        "status":            status,
+        "violations":        violations,
+        "remediation_steps": [fw["remediation"]] if violations else [],
+        "evaluated_at":      _now_iso(),
+    }
+
 # ---------------------------------------------------------------------------
 
 def compute_risk_assessment(
@@ -443,15 +591,23 @@ def build_fairness_passport(job_id: str, data: dict) -> dict:
     # --- AI Insights ---
     ai_insights = explanation.get("summary") or "No AI insights generated for this audit."
 
+    # --- Regulatory Compliance ---
+    regulatory = compute_regulatory_compliance(
+        use_case=config.get("use_case", "Other"),
+        disparities=disparities,
+        proxies=proxies,
+    )
+
     # --- Assemble Passport ---
     passport = {
         "job_id": job_id,
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "model_info": model_info,
         "fairness_summary": fairness_summary,
         "proxy_risks": formatted_proxies,
         "mitigation": mitigation,
         "risk_assessment": risk_assessment,
+        "regulatory_compliance": regulatory,
         "decision": decision,
         "audit_trace": audit_trace,
         "ai_insights": ai_insights,

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 import asyncio
 import concurrent.futures
 from datetime import datetime
@@ -11,6 +12,7 @@ import os
 import uuid
 import time
 import pandas as pd
+import threading
 
 # ── Structured logging ─────────────────────────────────────────────────────
 logging.basicConfig(
@@ -39,20 +41,40 @@ from signing import get_public_key_pem, get_public_key_hex
 from cache import cache_get, cache_set, cache_stats
 from validation import validate_dataset, validate_audit_config, sanitize_string
 from policy_engine import PolicyEngine, PolicyViolationException
+from model_ingestion import register_model_routes
 
-# In-memory storage for MVP (In production, load from Cloud Storage/Firestore)
-# Format: { job_id: {"df": DataFrame, "results": dict, "config": dict} }
-LOCAL_DATASTORE = {}
+from datastore import FirestoreBackedDict
+
+# Firestore-backed datastore — survives server restarts.
+# Falls back to memory-only if Firestore is unavailable.
+# Format: { job_id: {"df": DataFrame, "results": dict, "config": dict, ...} }
+LOCAL_DATASTORE: FirestoreBackedDict = FirestoreBackedDict()
+
+def save_to_firestore_safe(collection_name: str, doc_id: str, data: dict):
+    """Safely write to Firestore in the background. Fails silently if unavailable."""
+    try:
+        from firebase_client import get_firestore_client
+        db = get_firestore_client()
+        db.collection(collection_name).document(doc_id).set(data, merge=True)
+        logger.info(f"FIRESTORE | Successfully saved to {collection_name}/{doc_id}")
+    except Exception as e:
+        logger.debug(f"FIRESTORE | Skipped save (Firestore unavailable): {e}")
 
 app = FastAPI(title="FairLens Studio API")
 
+_CORS_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register model-upload routes (must come AFTER app is created)
+register_model_routes(app, LOCAL_DATASTORE)
+
 
 @app.exception_handler(PolicyViolationException)
 async def policy_exception_handler(request, exc: PolicyViolationException):
@@ -100,6 +122,38 @@ def read_root():
         "message": "FairLens Studio API",
         "cache": cache_stats(),
     }
+
+@app.get("/audits/recent")
+async def get_recent_audits():
+    """
+    Return the 10 most recent audit sessions from Firestore.
+    Powers the 'Recent Audits' panel on the Dashboard for returning users.
+    """
+    try:
+        from firebase_client import get_firestore_client
+        db = get_firestore_client()
+        docs = (
+            db.collection("audits")
+            .order_by("updated_at", direction="DESCENDING")
+            .limit(10)
+            .stream()
+        )
+        results = []
+        for doc in docs:
+            d = doc.to_dict()
+            results.append({
+                "job_id":        d.get("job_id", doc.id),
+                "filename":      d.get("filename", "unknown"),
+                "row_count":     d.get("row_count", 0),
+                "upload_time":   d.get("upload_time", ""),
+                "analysis_time": d.get("analysis_time", ""),
+                "config":        d.get("config", {}),
+                "has_results":   bool(d.get("results", {}).get("disparities")),
+            })
+        return {"audits": results}
+    except Exception as exc:
+        logger.warning("GET /audits/recent failed: %s", exc)
+        return {"audits": []}  # Graceful fallback — never 500
 
 @app.post("/audits/upload")
 async def upload_dataset(file: UploadFile = File(...)):
@@ -157,6 +211,48 @@ async def upload_dataset(file: UploadFile = File(...)):
 class AuditRunRequest(BaseModel):
     target_column: str
     protected_attributes: list[str]
+    ground_truth_column: Optional[str] = None
+
+class AuditConfigRequest(BaseModel):
+    job_id: str
+    user_id: Optional[str] = None
+    target: str
+    protected_attributes: list[str]
+    filename: Optional[str] = None
+    file_url: Optional[str] = None
+    use_case: Optional[str] = "Other"
+
+@app.post("/audits/config")
+async def save_audit_config(payload: AuditConfigRequest):
+    """
+    Save audit configuration (target column, protected attributes, use-case).
+    Called by the frontend NewAudit wizard after CSV upload.
+    """
+    if payload.job_id not in LOCAL_DATASTORE:
+        raise HTTPException(status_code=404, detail="Dataset not found. Upload a CSV first.")
+    LOCAL_DATASTORE[payload.job_id]["config"] = {
+        "target":    payload.target,
+        "protected": payload.protected_attributes,
+        "use_case":  payload.use_case,
+        "user_id":   payload.user_id,
+    }
+    LOCAL_DATASTORE[payload.job_id]["filename"] = payload.filename or LOCAL_DATASTORE[payload.job_id].get("filename", "unknown")
+    logger.info("CONFIG | job_id=%s target=%s protected=%s use_case=%s",
+                payload.job_id, payload.target, payload.protected_attributes, payload.use_case)
+    # Non-blocking Firestore sync
+    threading.Thread(
+        target=save_to_firestore_safe,
+        args=("audits", payload.job_id, {
+            "job_id":               payload.job_id,
+            "user_id":              payload.user_id,
+            "target_column":        payload.target,
+            "protected_attributes": payload.protected_attributes,
+            "use_case":             payload.use_case,
+            "filename":             payload.filename,
+            "config_saved_at":      datetime.utcnow().isoformat() + "Z",
+        })
+    ).start()
+    return {"status": "ok", "job_id": payload.job_id}
 
 class SimulationRequest(BaseModel):
     method: str
@@ -210,6 +306,16 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
             "protected": payload.protected_attributes,
         }
         LOCAL_DATASTORE[job_id]["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+        LOCAL_DATASTORE.sync(job_id)  # Persist updated results to Firestore
+
+        # Safe optional Firestore sync
+        firestore_data = {
+            "job_id": job_id,
+            "results": {"disparities": disparities, "proxies": proxies},
+            "config": LOCAL_DATASTORE[job_id]["config"],
+            "analysis_time": LOCAL_DATASTORE[job_id]["analysis_time"],
+        }
+        threading.Thread(target=save_to_firestore_safe, args=("audits", job_id, firestore_data)).start()
 
         result = {
             "status":     "success",
@@ -291,6 +397,7 @@ async def simulate_mitigation(job_id: str, payload: SimulationRequest):
 
     LOCAL_DATASTORE[job_id]["results"]["simulation"] = simulation
     LOCAL_DATASTORE[job_id]["simulation_time"] = datetime.utcnow().isoformat() + "Z"
+    LOCAL_DATASTORE.sync(job_id)  # Persist simulation result
 
     # Hash-chained log: simulation applied
     try:
@@ -810,6 +917,7 @@ async def compute_correlations(job_id: str, payload: CorrelationRequest):
 
         # Persist so other endpoints (passport, explain) can reference it
         LOCAL_DATASTORE[job_id]["results"]["correlations"] = correlation_results
+        LOCAL_DATASTORE.sync(job_id)
 
         return {
             "status": "success",
@@ -877,6 +985,7 @@ async def get_proxy_risks(job_id: str, payload: CorrelationRequest):
 
         # Persist for downstream endpoints (passport, explain)
         LOCAL_DATASTORE[job_id]["results"]["proxy_risks"] = proxy_risks
+        LOCAL_DATASTORE.sync(job_id)
 
         return {
             "status": "success",
@@ -1095,8 +1204,8 @@ async def run_fairness_copilot_api(audit_id: str):
     try:
         if audit_id not in LOCAL_DATASTORE:
             raise HTTPException(
-                status_code=404, 
-                detail="Backend server hot-reloaded and cleared local memory. Please click 'New Audit' and re-upload your CSV to continue."
+                status_code=404,
+                detail="Audit session not found. If you refreshed after submitting, your audit may have been restored — please re-run the fairness analysis to re-populate the session."
             )
             
         raw_results = LOCAL_DATASTORE[audit_id].get("results", {})

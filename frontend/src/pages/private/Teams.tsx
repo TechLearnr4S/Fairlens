@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAuditStore } from '../../store/auditStore';
 import AuditComments from '../../features/comments/AuditComments';
 import { Users, MessageSquare, Globe, Shield } from 'lucide-react';
@@ -100,3 +99,4 @@ export default function Teams() {
     </div>
   );
 }
+

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuditStore } from '../../store/auditStore';
-import { Play, FastForward, CheckCircle, Zap, ShieldCheck } from 'lucide-react';
+import { Play, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+
 
 export const DemoController: React.FC = () => {
   const navigate = useNavigate();
@@ -13,8 +14,8 @@ export const DemoController: React.FC = () => {
     setFile, setColumns, setColumnTypes, setPreview, setJobId,
     setTargetColumn, toggleProtectedAttribute,
     setDisparities, setProxies, setExplanation,
-    jobId, disparities, simulation
   } = useAuditStore();
+
 
   const runDemo = async () => {
     setIsDemoRunning(true);

@@ -1,4 +1,3 @@
-import React from 'react';
 import { 
   AlertTriangle, 
   Search, 
@@ -313,3 +312,4 @@ export default function ProxyBiasHunter() {
     </div>
   );
 }
+

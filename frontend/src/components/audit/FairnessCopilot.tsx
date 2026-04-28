@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Sparkles, 
   ShieldCheck, 
@@ -7,7 +7,6 @@ import {
   Loader, 
   CheckCircle2, 
   ChevronRight,
-  AlertTriangle,
   Info
 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
@@ -234,3 +233,6 @@ function AgentResultCard({ title, agent, content, delay }: { title: string, agen
     </div>
   );
 }
+
+
+

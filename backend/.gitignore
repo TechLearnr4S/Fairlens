@@ -3,3 +3,4 @@ venv/
 *.pyc
 .env
 fairlens_signing.key
+firebase-key.json

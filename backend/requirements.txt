@@ -5,7 +5,9 @@ pandas
 numpy
 scikit-learn
 scipy
+joblib
 google-generativeai
+google-genai
 python-multipart
 firebase-admin
 python-dotenv

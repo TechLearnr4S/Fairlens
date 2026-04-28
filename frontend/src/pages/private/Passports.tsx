@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAuditStore } from '../../store/auditStore';
 import FairnessPassport from '../../components/audit/FairnessPassport';
 import AuditIntegrity from '../../components/audit/AuditIntegrity';
@@ -69,3 +68,4 @@ export default function Passports() {
     </div>
   );
 }
+

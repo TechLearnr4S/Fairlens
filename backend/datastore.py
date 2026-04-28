@@ -67,7 +67,8 @@ def _get_db():
         _FIRESTORE_AVAILABLE = True
         logger.info("DATASTORE | Firestore client acquired.")
     except Exception as exc:
-        logger.warning("DATASTORE | Firestore unavailable (%s). Running memory-only.", exc)
+        # Reduced from warning to debug to clean up terminal for local-only demos
+        logger.debug("DATASTORE | Firestore unavailable (%s). Running memory-only.", exc)
         _db = None
     return _db
 

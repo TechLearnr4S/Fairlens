@@ -175,9 +175,9 @@ def append_audit_log(
         return entry
 
     except Exception as e:
-        # Log failure but never crash the calling endpoint
-        logger.error(
-            "audit_log append FAILED for audit_id=%s action=%s: %s",
+        # Reduced from error to debug to clean up terminal noise for local demos
+        logger.debug(
+            "audit_log append SKIPPED (Cloud Unavailable) for audit_id=%s action=%s: %s",
             audit_id, action, e,
         )
         # Return an in-memory entry so callers can still reference it

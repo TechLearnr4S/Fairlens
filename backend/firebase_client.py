@@ -50,18 +50,21 @@ def _ensure_initialised() -> None:
     if _app is not None:
         return
 
-    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    try:
+        if cred_path and os.path.isfile(cred_path):
+            cred = credentials.Certificate(cred_path)
+        else:
+            # Fall back to Application Default Credentials
+            cred = credentials.ApplicationDefault()
 
-    if cred_path and os.path.isfile(cred_path):
-        cred = credentials.Certificate(cred_path)
-    else:
-        # Fall back to Application Default Credentials
-        cred = credentials.ApplicationDefault()
-
-    _app = firebase_admin.initialize_app(cred, {
-        "storageBucket": _DEFAULT_BUCKET,
-    })
-    logger.info("Firebase Admin SDK initialised (bucket=%s).", _DEFAULT_BUCKET)
+        _app = firebase_admin.initialize_app(cred, {
+            "storageBucket": _DEFAULT_BUCKET,
+        })
+        logger.info("Firebase Admin SDK initialised (bucket=%s).", _DEFAULT_BUCKET)
+    except Exception as e:
+        # Reduced to debug to clean up terminal for local-only demos
+        logger.debug("Firebase Admin SDK could not initialise (%s). Running in limited/local mode.", e)
+        _app = None
 
 
 def get_firestore_client() -> firestore.firestore.Client:

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, CheckCircle, Send, Plus, X, Clock } from 'lucide-react';
+import { apiFetch } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../../components/ui/AuditEmptyState';
 
 interface Comment {
   id: string;
@@ -26,15 +28,18 @@ export default function AuditComments({ jobId }: { jobId: string }) {
   const [newCommentText, setNewCommentText] = useState('');
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [threadsError, setThreadsError] = useState(false);
 
   // Hardcode an author name for MVP
   const currentUser = "Auditor (Demo)";
 
   const fetchThreads = async () => {
+    setThreadsError(false);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/threads`);
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/threads`);
       if (!res.ok) {
         setThreads([]);
+        setThreadsError(true);
         return;
       }
       const data = await res.json();
@@ -42,6 +47,7 @@ export default function AuditComments({ jobId }: { jobId: string }) {
     } catch (e) {
       console.error('Failed to fetch threads', e);
       setThreads([]);
+      setThreadsError(true);
     }
   };
 
@@ -54,7 +60,7 @@ export default function AuditComments({ jobId }: { jobId: string }) {
     if (!newThreadTitle.trim()) return;
     try {
       setLoading(true);
-      await fetch(`http://localhost:8000/audits/${jobId}/threads`, {
+      await apiFetch(`http://localhost:8000/audits/${jobId}/threads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newThreadTitle, author: currentUser })
@@ -71,7 +77,7 @@ export default function AuditComments({ jobId }: { jobId: string }) {
 
   const fetchComments = async (threadId: string) => {
     try {
-      const res = await fetch(`http://localhost:8000/threads/${threadId}/comments`);
+      const res = await apiFetch(`http://localhost:8000/threads/${threadId}/comments`);
       const data = await res.json();
       setThreads(prev => prev.map(t => t.id === threadId ? { ...t, comments: data } : t));
     } catch (e) {
@@ -90,7 +96,7 @@ export default function AuditComments({ jobId }: { jobId: string }) {
     if (!newCommentText.trim()) return;
     try {
       setLoading(true);
-      await fetch(`http://localhost:8000/threads/${threadId}/comments`, {
+      await apiFetch(`http://localhost:8000/threads/${threadId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: newCommentText, author: currentUser })
@@ -106,7 +112,7 @@ export default function AuditComments({ jobId }: { jobId: string }) {
 
   const handleResolveThread = async (threadId: string, resolved: boolean) => {
     try {
-      await fetch(`http://localhost:8000/threads/${threadId}/resolve?resolved=${resolved}`, {
+      await apiFetch(`http://localhost:8000/threads/${threadId}/resolve?resolved=${resolved}`, {
         method: 'PATCH'
       });
       await fetchThreads();
@@ -119,6 +125,20 @@ export default function AuditComments({ jobId }: { jobId: string }) {
     const d = new Date(dateString);
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
+
+  if (threadsError && threads.length === 0) {
+    return (
+      <AuditEmptyState
+        variant="failed-api"
+        title="Comments could not load"
+        description="The collaboration service did not respond. Check the API, then retry."
+        onRetry={() => void fetchThreads()}
+        retryLabel="Reload threads"
+        className="glass-panel h-[400px] justify-center border-primary-500/20"
+        compact
+      />
+    );
+  }
 
   return (
     <div className="glass-panel p-6 border-primary-500/20 flex flex-col h-[600px]">

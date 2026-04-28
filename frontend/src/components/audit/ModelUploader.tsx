@@ -4,6 +4,9 @@ import {
   UploadCloud, Cpu, CheckCircle2, AlertCircle,
   Loader2, FileCode2, ChevronRight, Info
 } from 'lucide-react';
+import { EnhancedColumnSelector } from './EnhancedColumnSelector';
+import { apiFetch } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 const ACCEPTED = ['.pkl', '.joblib'];
 
@@ -40,7 +43,7 @@ export default function ModelUploader() {
       if (featureCols.length > 0) {
         fd.append('feature_columns', featureCols.join(','));
       }
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/upload-model`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/upload-model`, {
         method: 'POST',
         body: fd,
       });
@@ -48,7 +51,7 @@ export default function ModelUploader() {
       if (!res.ok) throw new Error(data.detail || 'Upload failed');
       setResult(data);
       // Re-fetch audit results since model predictions were injected
-      const auditRes = await fetch(`http://localhost:8000/audits/${jobId}/run`, { method: 'GET' }).catch(() => null);
+      const auditRes = await apiFetch(`http://localhost:8000/audits/${jobId}/run`, { method: 'GET' }).catch(() => null);
       if (auditRes?.ok) {
         const auditData = await auditRes.json();
         if (auditData.disparities) setDisparities(auditData.disparities);
@@ -68,7 +71,17 @@ export default function ModelUploader() {
     );
   };
 
-  if (!jobId) return null;
+  if (!jobId) {
+    return (
+      <AuditEmptyState
+        variant="no-audit"
+        title="Model file audit"
+        description="Complete a dataset audit first. Then you can attach a pickle/joblib model to score predictions."
+        compact
+        className="glass-panel rounded-3xl border-slate-700/50"
+      />
+    );
+  }
 
   return (
     <div className="glass-panel p-8 bg-slate-900/40 border-slate-700/50 rounded-3xl space-y-6">
@@ -159,21 +172,11 @@ export default function ModelUploader() {
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {nonTargetCols.map(col => (
-              <button
-                key={col}
-                onClick={() => toggleFeatureCol(col)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                  featureCols.includes(col)
-                    ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
-                    : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-500'
-                }`}
-              >
-                {col}
-              </button>
-            ))}
-          </div>
+          <EnhancedColumnSelector
+            columns={nonTargetCols}
+            selectedColumns={featureCols}
+            onToggle={toggleFeatureCol}
+          />
         </div>
       )}
 

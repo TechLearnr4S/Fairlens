@@ -18,9 +18,12 @@ import {
   Area
 } from 'recharts';
 import { Play, RotateCcw, ShieldAlert, Zap, TrendingUp, TrendingDown, Info, AlertCircle } from 'lucide-react';
-import { ToastContainer, type ToastType } from '../ui/Toast';
+import { useToast } from '../providers/ToastProvider';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 export default function BiasSandbox() {
+  const { addToast } = useToast();
   const { jobId, simulation, setSimulation, isSimulating, setIsSimulating, columns, targetColumn, protectedAttributes } = useAuditStore();
   const [method, setMethod] = useState<'threshold_adjustment' | 'feature_removal' | 'reweighing'>('threshold_adjustment');
   const [threshold, setThreshold] = useState(0.5);
@@ -28,15 +31,7 @@ export default function BiasSandbox() {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [tradeoffCurve, setTradeoffCurve] = useState<any[]>([]);
   const [recommendation, setRecommendation] = useState<any>(null);
-  const [toasts, setToasts] = useState<{id: string, message: string, type: ToastType}[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
-
-  const addToast = (message: string, type: ToastType) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, message, type }]);
-  };
-
-  const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
   
   // Filter out target and protected attributes from removable features
   const removableFeatures = React.useMemo(() => 
@@ -67,7 +62,7 @@ export default function BiasSandbox() {
     
     setIsSimulating(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/simulate`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -96,8 +91,10 @@ export default function BiasSandbox() {
         if (controller.signal.aborted) return;
         addToast(data.detail || "Simulation failed", 'error');
       }
-    } catch (e: any) {
-      if (e.name === 'AbortError') return;
+    } catch (e: unknown) {
+      const err = e as { name?: string };
+      if (err.name === 'AbortError') return;
+      if (isRequestTimeout(e)) return;
       console.error(e);
       addToast("Failed to connect to simulation engine.", 'error');
     } finally {
@@ -106,13 +103,13 @@ export default function BiasSandbox() {
         setIsSimulating(false);
       }
     }
-  }, [jobId, method, threshold, feature, removableFeatures, setIsSimulating, setSimulation]);
+  }, [jobId, method, threshold, feature, removableFeatures, setIsSimulating, setSimulation, addToast]);
 
   const handleOptimize = async () => {
     if (!jobId) return;
     setIsOptimizing(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/optimize`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/optimize`, {
         method: 'POST'
       });
       const data = await res.json();
@@ -124,6 +121,7 @@ export default function BiasSandbox() {
         addToast(data.detail || "Optimization failed", 'error');
       }
     } catch (e) {
+      if (isRequestTimeout(e)) return;
       addToast("Failed to connect to optimization engine", 'error');
     } finally {
       setIsOptimizing(false);
@@ -134,11 +132,11 @@ export default function BiasSandbox() {
   const fetchRecommendation = useCallback(async () => {
     if (!jobId) return;
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/recommendation`);
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/recommendation`);
       const data = await res.json();
       if (res.ok) setRecommendation(data);
     } catch (e) {
-      console.error("Failed to fetch recommendation", e);
+      if (!isRequestTimeout(e)) console.error("Failed to fetch recommendation", e);
     }
   }, [jobId]);
 
@@ -178,6 +176,18 @@ export default function BiasSandbox() {
   const confidenceScore = Math.round((Number(simulation?.confidence) || 0) * 100);
   const afterDisparity = Number(simulation?.after?.disparity) || 0;
   const afterAccuracy = Number(simulation?.after?.accuracy) || 0;
+
+  if (!jobId) {
+    return (
+      <AuditEmptyState
+        variant="no-audit"
+        title="Bias Sandbox"
+        description="Run an audit so we know your dataset and job id. Then you can simulate mitigation strategies."
+        compact
+        className="glass-panel rounded-3xl border-slate-700/50"
+      />
+    );
+  }
 
   return (
     <div className="glass-panel p-8 bg-slate-900/40 border-slate-700/50 rounded-3xl overflow-hidden relative">
@@ -662,7 +672,6 @@ export default function BiasSandbox() {
           )}
         </div>
       </div>
-      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

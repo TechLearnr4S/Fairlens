@@ -119,7 +119,13 @@ async def generate_ai_insight(findings: list[dict], proxies: list[dict], mitigat
     Optimised to use a single LLM call with structured JSON output.
     """
     if not _client:
-        return fallback_ai_insight()
+        return {
+            "explanation": "The analysis detected disparities in selection rates across protected subgroups.",
+            "governance_summary": "Status: Pending Mitigation. The model requires threshold adjustments.",
+            "regulatory_risk": "Potential compliance risk under automated decision-making regulations.",
+            "severity": "MEDIUM",
+            "recommended_action": "Review feature correlations and apply threshold adjustments."
+        }
 
     prompt = (
         "You are an AI fairness expert for FairLens Studio.\n\n"
@@ -129,22 +135,68 @@ async def generate_ai_insight(findings: list[dict], proxies: list[dict], mitigat
         f"- Mitigation Strategy: {json.dumps(mitigation, indent=2)}\n\n"
         "Tasks:\n"
         "1. Explain the fairness issues in simple, jargon-free language.\n"
-        "2. Provide a final governance recommendation based on the findings.\n\n"
-        'Return a STRICT JSON object with keys "explanation" (string) and "governance_summary" (string).'
+        "2. Provide a final governance recommendation based on the findings.\n"
+        "3. Assess regulatory risks, severity level, and recommended actions.\n"
     )
 
     try:
-        response_text = await asyncio.to_thread(
-            generate_completion, prompt, "Fairness Copilot", True
+        # 1. Add structured response schema
+        schema = types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "explanation": types.Schema(type=types.Type.STRING),
+                "governance_summary": types.Schema(type=types.Type.STRING),
+                "regulatory_risk": types.Schema(type=types.Type.STRING),
+                "severity": types.Schema(
+                    type=types.Type.STRING,
+                    enum=["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+                ),
+                "recommended_action": types.Schema(type=types.Type.STRING),
+            },
+            required=["explanation", "governance_summary", "severity"],
         )
-        data = json.loads(response_text) if response_text else {}
+
+        # 2. Use response_mime_type="application/json"
+        # 3. Add response_schema
+        response = await asyncio.to_thread(
+            _client.models.generate_content,
+            model=_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                max_output_tokens=800,
+                temperature=0.2,
+                response_mime_type="application/json",
+                response_schema=schema,
+            )
+        )
+        
+        response_text = response.text.strip() if response and response.text else "{}"
+        
+        # 4. Safely parse response into Python dict
+        try:
+            data = json.loads(response_text)
+        # 5. Add fallback if JSON parsing fails
+        except json.JSONDecodeError:
+            logger.error("JSON parsing failed for response: %s", response_text)
+            data = {}
+            
         return {
-            "explanation":        data.get("explanation",        "Disparity detected in subgroup selection."),
+            "explanation":        data.get("explanation", "Disparity detected in subgroup selection."),
             "governance_summary": data.get("governance_summary", "Status: Pending Mitigation."),
+            "regulatory_risk":    data.get("regulatory_risk", "Potential compliance risk."),
+            "severity":           data.get("severity", "MEDIUM"),
+            "recommended_action": data.get("recommended_action", "Review feature correlations."),
         }
     except Exception as e:
         logger.error("Generate AI insight failed: %s", e)
-        return fallback_ai_insight()
+        return {
+            "explanation": "The analysis detected disparities in selection rates across protected subgroups.",
+            "governance_summary": "Status: Pending Mitigation. The model requires threshold adjustments.",
+            "regulatory_risk": "Potential compliance risk under automated decision-making regulations.",
+            "severity": "MEDIUM",
+            "recommended_action": "Review feature correlations and apply threshold adjustments."
+        }
+
 
 
 def fallback_ai_insight() -> dict:

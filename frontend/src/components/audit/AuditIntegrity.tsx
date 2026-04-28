@@ -6,6 +6,8 @@ import {
   ChevronDown, ChevronUp, AlertTriangle,
 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -154,14 +156,16 @@ export default function AuditIntegrity() {
     setReport(null);
 
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/verify`);
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/verify`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       let data: VerifyReport;
       try { data = await res.json(); } catch { throw new Error('Invalid JSON response'); }
       setReport(data);
       setVerifiedAt(new Date().toLocaleString());
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Unknown error');
+      if (!isRequestTimeout(e)) {
+        setError(e instanceof Error ? e.message : 'Unknown error');
+      }
     } finally {
       setLoading(false);
     }
@@ -173,12 +177,14 @@ export default function AuditIntegrity() {
     
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/tamper`, { method: 'POST' });
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/tamper`, { method: 'POST' });
       if (!res.ok) throw new Error("Tamper simulation failed");
       alert("Tampering complete. The hash chain has been broken.");
       runVerification(); // Refresh the status
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      if (!isRequestTimeout(e)) {
+        alert(e instanceof Error ? e.message : 'Unknown error');
+      }
     } finally {
       setLoading(false);
     }
@@ -250,28 +256,38 @@ export default function AuditIntegrity() {
         </div>
       </div>
 
-      {/* ── Error State ────────────────────────────────────────────────────── */}
-      {error && (
-        <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-3">
-          <ShieldX size={18} className="text-rose-400 shrink-0" />
-          <p className="text-rose-300 text-sm font-medium">{error}</p>
-        </div>
-      )}
-
-      {/* ── No Job Prompt ──────────────────────────────────────────────────── */}
       {!jobId && !hasReport && (
-        <div className="py-10 flex flex-col items-center justify-center text-slate-600 gap-3">
-          <Lock size={36} className="opacity-30" />
-          <p className="text-sm">Run an audit first to enable integrity verification.</p>
-        </div>
+        <AuditEmptyState
+          variant="no-audit"
+          title="Integrity verification locked"
+          description="Run an audit first. The verifier checks tamper-evident hashing for this job."
+          compact
+          className="my-4"
+        />
       )}
 
-      {/* ── Idle prompt ────────────────────────────────────────────────────── */}
+      {jobId && error && !hasReport && (
+        <AuditEmptyState
+          variant="failed-api"
+          title="Verification request failed"
+          description={error}
+          onRetry={runVerification}
+          retryLabel="Try verification again"
+          compact
+          className="my-4"
+        />
+      )}
+
       {jobId && !hasReport && !loading && !error && (
-        <div className="py-10 flex flex-col items-center justify-center text-slate-500 gap-3">
-          <ShieldAlert size={36} className="opacity-40" />
-          <p className="text-sm">Click <strong className="text-slate-300">Verify Audit Trail</strong> to check chain integrity.</p>
-        </div>
+        <AuditEmptyState
+          variant="missing-data"
+          title="Audit trail not verified yet"
+          description="Compute hash-chain validity for your job’s persisted steps."
+          cta={{ label: 'Verify audit trail', onClick: runVerification }}
+          icon={ShieldAlert}
+          compact
+          className="my-4 border border-slate-700/60"
+        />
       )}
 
       {/* ── Result Panel ───────────────────────────────────────────────────── */}

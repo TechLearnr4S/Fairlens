@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+backend/venv/
+.venv/
+backend/.env
+.env
+
+
+# Node
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.env
+
+# Secrets/Keys
+backend/fairlens_signing.key
+backend/firebase-key.json

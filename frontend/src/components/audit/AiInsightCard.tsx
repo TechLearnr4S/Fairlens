@@ -1,24 +1,56 @@
+import { useState } from 'react';
 import { Sparkles, AlertCircle, HelpCircle, Activity, Lightbulb } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 export default function AiInsightCard() {
   const { jobId, aiInsight, isExplaining, setIsExplaining, setAiInsight } = useAuditStore();
+  const [explainError, setExplainError] = useState(false);
 
   const handleExplain = async () => {
     if (!jobId) return;
+    setExplainError(false);
     setIsExplaining(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/explain`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/explain`, {
         method: 'POST'
       });
       const data = await res.json();
       setAiInsight(data);
     } catch (err) {
       console.error(err);
+      if (!isRequestTimeout(err)) setExplainError(true);
     } finally {
       setIsExplaining(false);
     }
   };
+
+  if (!jobId) {
+    return (
+      <AuditEmptyState
+        variant="no-audit"
+        title="AI insight unavailable"
+        description="Complete an audit run first to generate Gemini-powered explanations of disparity patterns."
+        compact
+        className="glass-panel"
+      />
+    );
+  }
+
+  if (explainError && !aiInsight && !isExplaining) {
+    return (
+      <AuditEmptyState
+        variant="failed-api"
+        title="Explanation failed"
+        description="Gemini could not analyze this audit. Retry or check API keys and backend logs."
+        onRetry={handleExplain}
+        retryLabel="Try again"
+        compact
+        className="glass-panel border-indigo-500/20"
+      />
+    );
+  }
 
   if (!aiInsight && !isExplaining) {
     return (

@@ -10,6 +10,8 @@ import {
   Info
 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 const AGENTS = [
   { id: 'auditor', name: 'Auditor Agent', icon: ShieldCheck, color: 'text-rose-400', bg: 'bg-rose-500/10' },
@@ -28,9 +30,11 @@ export default function FairnessCopilot() {
   } = useAuditStore();
   
   const [activeStep, setActiveStep] = useState<number>(-1);
+  const [apiError, setApiError] = useState(false);
 
   const runCopilot = async () => {
     if (!jobId) return;
+    setApiError(false);
     setIsCopilotRunning(true);
     setCopilotSummary(null);
     setActiveStep(0);
@@ -45,7 +49,7 @@ export default function FairnessCopilot() {
     }, 2000);
 
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/copilot`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/copilot`, {
         method: 'POST'
       });
       const data = await res.json();
@@ -59,12 +63,38 @@ export default function FairnessCopilot() {
       setCopilotSummary(data);
     } catch (err) {
       console.error("Copilot failed:", err);
-      alert("Network error: failed to reach copilot backend.");
+      if (!isRequestTimeout(err)) setApiError(true);
     } finally {
       setIsCopilotRunning(false);
       setActiveStep(3);
     }
   };
+
+  if (!jobId) {
+    return (
+      <AuditEmptyState
+        variant="no-audit"
+        title="Fairness Copilot"
+        description="Complete an audit first. Copilot runs a multi-agent pipeline on your job’s findings."
+        className="glass-panel border-indigo-500/20 mb-8"
+        compact
+      />
+    );
+  }
+
+  if (apiError && !copilotSummary && !isCopilotRunning) {
+    return (
+      <AuditEmptyState
+        variant="failed-api"
+        title="Copilot could not run"
+        description="The multi-agent analysis did not complete. Check the API and try again."
+        onRetry={runCopilot}
+        retryLabel="Run Copilot again"
+        className="glass-panel border-indigo-500/20 mb-8"
+        compact
+      />
+    );
+  }
 
   if (!copilotSummary && !isCopilotRunning) {
     return (

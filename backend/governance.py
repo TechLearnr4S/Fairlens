@@ -122,6 +122,262 @@ REGULATORY_FRAMEWORKS: dict = {
     },
 }
 
+# Extensible synonym map → canonical ``REGULATORY_FRAMEWORKS`` keys.
+USE_CASE_ALIASES: dict[str, str] = {
+    "credit": "Credit Scoring",
+    "Credit": "Credit Scoring",
+    "lending": "Credit Scoring",
+    "Lending": "Credit Scoring",
+    "healthcare": "Healthcare",
+    "Health": "Healthcare",
+    "health": "Healthcare",
+}
+
+# Concise statutory labels surfaced in APIs (paired with frameworks below).
+LAW_HEADLINE_BY_USE_CASE: dict[str, str] = {
+    "Hiring": (
+        "EEOC Uniform Guidelines — 4/5ths (80%) Rule (adverse impact / disparate impact)"
+    ),
+    "Credit Scoring": (
+        "Equal Credit Opportunity Act (ECOA) / FHA — disparate treatment & impact"
+    ),
+    "Healthcare": (
+        "ACA Section 1557 — non-discrimination in health programs and clinical algorithms"
+    ),
+    "Criminal Justice": (
+        "Equal Protection / COMPAS-style disparate error parity"
+    ),
+    "Other": "IEEE / EU AI Act — proportional disparity bounds",
+}
+
+LAW_SHORT_LABEL_BY_USE_CASE: dict[str, str] = {
+    "Hiring": "EEOC 80% Rule",
+    "Credit Scoring": "ECOA",
+    "Healthcare": "ACA 1557",
+    "Criminal Justice": "Equal Protection",
+    "Other": "General AI Fairness",
+}
+
+METRIC_DISPLAY_LABELS: dict[str, str] = {
+    "disparate_impact_ratio": "Disparate Impact",
+    "disparity_score": "Disparity Score",
+    "tpr_gap": "TPR Gap",
+    "fpr_gap": "FPR Gap",
+    "fnr_gap": "FNR Gap",
+    "fpr_disparity": "FPR Disparity",
+    "fnr_disparity": "FNR Disparity",
+}
+
+REMEDIATION_BY_USE_CASE: dict[str, str] = {
+    "Hiring": "Adjust model or justify business necessity.",
+    "Credit Scoring": "Recalibrate credit policy and remove disparate-impact drivers.",
+    "Healthcare": "Recalibrate clinical thresholds and validate on all subgroups.",
+    "Criminal Justice": "Recalibrate risk thresholds and require human review.",
+    "Other": "Apply bias mitigation and document governance controls.",
+}
+
+
+def _canonical_use_case(use_case: str) -> str:
+    if not isinstance(use_case, str) or not use_case.strip():
+        return "Other"
+    t = use_case.strip()
+    return USE_CASE_ALIASES.get(t, t)
+
+
+def _severity_di_eeoc(value: float, threshold: float, violation: bool) -> str:
+    """Hiring — EEOC 80% rule: violation when ``0 < value < threshold`` (minority/min selection ratio)."""
+    if not violation:
+        return "NONE"
+    if value <= 0:
+        return "CRITICAL"
+    slack = threshold - value
+    # Deeper departures below 80% → higher severity.
+    if slack >= 0.30:
+        return "CRITICAL"
+    if slack >= 0.15:
+        return "HIGH"
+    if slack >= 0.05:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _severity_gap_upper_ecoa(value: float, threshold: float, violation: bool) -> str:
+    """Credit — ECOA / TPR gap: higher gap than threshold is worse."""
+    if not violation:
+        return "NONE"
+    excess = value - threshold
+    if excess >= threshold * 2.5 or value >= threshold * 3.5:
+        return "CRITICAL"
+    if excess >= threshold * 1.2 or value >= threshold * 2.2:
+        return "HIGH"
+    if excess >= threshold * 0.45:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _severity_gap_upper_aca(value: float, threshold: float, violation: bool) -> str:
+    """Healthcare — ACA § 1557 FPR-gap: tighter clinical band."""
+    if not violation:
+        return "NONE"
+    excess = value - threshold
+    if value >= threshold * 4 or excess >= 0.25:
+        return "CRITICAL"
+    if excess >= threshold * 2.5 or value >= threshold * 2.8:
+        return "HIGH"
+    if excess >= threshold * 1.0:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _severity_gap_upper_general(value: float, threshold: float, violation: bool) -> str:
+    """Other / secondary metrics — conservative gap tiers."""
+    if not violation:
+        return "NONE"
+    excess = value - threshold
+    rel = excess / threshold if threshold > 1e-12 else excess
+    if rel > 2.0 or value >= threshold * 3.0:
+        return "CRITICAL"
+    if rel > 1.0 or value >= threshold * 2.0:
+        return "HIGH"
+    if rel > 0.35:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _severity_criminal_gap(value: float, threshold: float, violation: bool) -> str:
+    if not violation:
+        return "NONE"
+    excess = value - threshold
+    if excess >= threshold * 2.2 or value >= threshold * 3.2:
+        return "CRITICAL"
+    if excess >= threshold * 1.1:
+        return "HIGH"
+    if excess >= threshold * 0.4:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _compute_severity(
+    *,
+    canonical_use: str,
+    metric_name: str,
+    value: float,
+    threshold_used: float,
+    violation: bool,
+    is_di_metric: bool,
+    is_secondary_metric: bool,
+) -> str:
+    """Dispatch deterministic severity tier (NONE | LOW | MEDIUM | HIGH | CRITICAL)."""
+    if is_di_metric:
+        return _severity_di_eeoc(value, threshold_used, violation)
+    if is_secondary_metric:
+        return _severity_gap_upper_general(value, threshold_used, violation)
+    if canonical_use == "Hiring":
+        return _severity_gap_upper_general(value, threshold_used, violation)
+    if canonical_use == "Credit Scoring":
+        return _severity_gap_upper_ecoa(value, threshold_used, violation)
+    if canonical_use == "Healthcare":
+        return _severity_gap_upper_aca(value, threshold_used, violation)
+    if canonical_use == "Criminal Justice":
+        return _severity_criminal_gap(value, threshold_used, violation)
+    return _severity_gap_upper_general(value, threshold_used, violation)
+
+
+def evaluate_regulatory_risk(metric_name: str, value: float, use_case: str) -> dict:
+    """
+    Deterministic regulatory check for one ``(metric_name, value)`` under a use case.
+
+    **Regs**
+
+    - **Hiring** → EEOC 80% / four-fifths on ``disparate_impact_ratio`` (values strictly between 0 and 0.8 violate).
+    - **Credit Scoring** → ECOA-style upward gap metrics (typically ``value > threshold`` on ``tpr_gap``).
+    - **Healthcare** → ACA Section 1557 on tighter ``fpr_gap`` bounds.
+
+    Add new regimes by extending ``REGULATORY_FRAMEWORKS`` and optionally ``USE_CASE_ALIASES``.
+    Severity is reproducible — no RNG or timestamps in output.
+
+    Returns
+    -------
+    dict
+        ``law``, ``metric``, ``value``, ``threshold``, ``violation``, ``severity``,
+        ``explanation``, ``remediation``.
+    """
+    v = float(value)
+    canonical = _canonical_use_case(use_case)
+
+    fw = REGULATORY_FRAMEWORKS.get(canonical, REGULATORY_FRAMEWORKS["Other"])
+    fw_other = REGULATORY_FRAMEWORKS["Other"]
+    fw_hiring = REGULATORY_FRAMEWORKS["Hiring"]
+
+    primary_metric = fw["metric"]
+    law_long = LAW_HEADLINE_BY_USE_CASE.get(canonical, fw["law"])
+    law_short = LAW_SHORT_LABEL_BY_USE_CASE.get(canonical, fw.get("law", "General AI Fairness"))
+    metric_label = METRIC_DISPLAY_LABELS.get(metric_name, metric_name.replace("_", " ").title())
+
+    violation = False
+    threshold_used = fw["threshold"]
+    cite_fw = fw
+    is_di_metric = False
+    is_secondary_metric = False
+
+    # Dynamic threshold selection — which rule applies to this column.
+    if metric_name == "disparate_impact_ratio":
+        cite_fw = fw_hiring
+        threshold_used = fw_hiring["threshold"]
+        is_di_metric = True
+        violation = bool(v > 0 and v < threshold_used)
+    elif metric_name == primary_metric:
+        cite_fw = fw
+        threshold_used = fw["threshold"]
+        if primary_metric == "disparate_impact_ratio":
+            is_di_metric = True
+            violation = bool(v > 0 and v < threshold_used)
+        else:
+            violation = bool(v > threshold_used)
+    else:
+        is_secondary_metric = True
+        cite_fw = fw_other
+        threshold_used = fw_other["threshold"]
+        violation = bool(v > threshold_used)
+
+    severity = _compute_severity(
+        canonical_use=canonical,
+        metric_name=metric_name,
+        value=v,
+        threshold_used=threshold_used,
+        violation=violation,
+        is_di_metric=is_di_metric,
+        is_secondary_metric=is_secondary_metric,
+    )
+    if severity == "NONE":
+        severity = "LOW"
+
+    comparator = "below" if is_di_metric else "above"
+    cmp_word = "below" if is_di_metric else "within"
+    if violation:
+        explanation = (
+            f"{metric_label} is {v:.2f}, {comparator} the {threshold_used:.2f} threshold under {law_short}."
+        )
+        remediation = REMEDIATION_BY_USE_CASE.get(canonical, "Apply bias mitigation and document governance controls.")
+    else:
+        explanation = (
+            f"{metric_label} is {v:.2f}, {cmp_word} the {threshold_used:.2f} threshold under {law_short}."
+        )
+        remediation = "Continue monitoring and keep an auditable compliance record."
+
+    return {
+        "law": law_short,
+        "metric": metric_label,
+        "metric_key": metric_name,
+        "value": round(v, 6),
+        "threshold": threshold_used,
+        "violation": violation,
+        "severity": severity,
+        "explanation": explanation,
+        "remediation": remediation,
+        "framework": law_long,
+    }
+
 
 def compute_regulatory_compliance(
     use_case: str,

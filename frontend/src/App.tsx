@@ -6,6 +6,8 @@ import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { AuthLayout } from './components/layout/AuthLayout';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 
+import { ToastProvider } from './components/providers/ToastProvider';
+
 import Landing from './pages/public/Landing';
 import Login from './pages/public/Login';
 import Signup from './pages/public/Signup';
@@ -49,6 +51,7 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <Router>
+          <ToastProvider>
           <Routes>
             <Route element={<AuthLayout />}>
               <Route path="/login" element={<Login />} />
@@ -66,6 +69,7 @@ function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </ToastProvider>
         </Router>
       </AuthProvider>
     </ErrorBoundary>

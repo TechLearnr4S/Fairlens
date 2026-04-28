@@ -6,6 +6,9 @@ import {
   CheckCircle, XCircle, AlertCircle, Info, TrendingDown,
 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
+import { MetricStatus } from '../ui/MetricStatus';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +23,27 @@ interface FairnessSummary {
   key_metrics: KeyMetrics;
   affected_groups: string[];
   disparity_by_attribute?: Record<string, number>;
+}
+
+interface RegulatoryFramework {
+  name?: string;
+  body?: string;
+  reference?: string;
+}
+
+interface RegulatoryViolation {
+  attribute?: string;
+  metric?: string;
+  value?: number;
+  threshold?: number;
+  detail?: string;
+}
+
+interface RegulatoryCompliance {
+  framework?: RegulatoryFramework;
+  status?: string;
+  violations?: RegulatoryViolation[];
+  remediation_steps?: string[];
 }
 
 interface ProxyRisk {
@@ -65,6 +89,7 @@ interface Passport {
   fairness_summary: FairnessSummary;
   proxy_risks: ProxyRisk[];
   mitigation: Mitigation;
+  regulatory_compliance?: RegulatoryCompliance;
   risk_assessment: RiskAssessment;
   decision: Decision;
   audit_trace: AuditTrace;
@@ -210,6 +235,7 @@ export default function FairnessPassport() {
   const [passport, setPassport] = useState<Passport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fetchNonce, setFetchNonce] = useState(0);
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -218,19 +244,21 @@ export default function FairnessPassport() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`http://localhost:8000/audits/${jobId}/passport`);
+        const res = await apiFetch(`http://localhost:8000/audits/${jobId}/passport`);
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
         let data: Passport;
         try { data = await res.json(); } catch { throw new Error('Invalid JSON from server'); }
         setPassport(data);
       } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : 'Unknown error');
+        if (!isRequestTimeout(e)) {
+          setError(e instanceof Error ? e.message : 'Unknown error');
+        }
       } finally {
         setLoading(false);
       }
     };
     fetchPassport();
-  }, [jobId]);
+  }, [jobId, fetchNonce]);
 
   const downloadJSON = () => {
     if (!passport) return;
@@ -252,7 +280,22 @@ export default function FairnessPassport() {
   const risk = passport?.risk_assessment;
   const dec = passport?.decision;
   const fm = passport?.fairness_summary;
+  const reg = passport?.regulatory_compliance;
   const km = fm?.key_metrics ?? {};
+
+  const diValue = Number(km.disparate_impact_ratio ?? 0);
+  const diThreshold = Number(reg?.violations?.[0]?.threshold ?? 0.8);
+  const diViolation = (Array.isArray(reg?.violations) && reg!.violations!.length > 0)
+    || (diValue > 0 && diValue < diThreshold);
+  const regLaw = reg?.framework?.name || 'EEOC 80% Rule';
+  const regExplanation = reg?.violations?.[0]?.detail
+    || (diViolation
+      ? `Selection rate below ${diThreshold.toFixed(2)} threshold.`
+      : `Selection rate meets ${diThreshold.toFixed(2)} threshold.`);
+  const regRemediation = reg?.remediation_steps?.[0]
+    || (diViolation
+      ? 'Adjust model or justify business necessity.'
+      : 'Continue monitoring and keep compliance records.');
 
   const riskScoreBar = Math.min((risk?.risk_score ?? 0) * 100, 100);
   const riskBarColor =
@@ -261,10 +304,11 @@ export default function FairnessPassport() {
 
   if (!jobId) {
     return (
-      <div className="glass-panel p-10 text-center text-slate-500">
-        <ShieldCheck size={40} className="mx-auto mb-4 opacity-40" />
-        <p className="text-sm">Run an audit to generate a Fairness Passport.</p>
-      </div>
+      <AuditEmptyState
+        variant="no-audit"
+        title="Fairness Passport unavailable"
+        description="Run a fairness audit first. The passport summarizes risk, metrics, and deployment guidance for this job."
+      />
     );
   }
 
@@ -279,11 +323,17 @@ export default function FairnessPassport() {
 
   if (error || !passport) {
     return (
-      <div className="glass-panel p-10 text-center text-rose-400">
-        <ShieldX size={40} className="mx-auto mb-4 opacity-60" />
-        <p className="font-semibold">Failed to load passport</p>
-        <p className="text-sm text-slate-400 mt-1">{error ?? 'Unknown error'}</p>
-      </div>
+      <AuditEmptyState
+        variant="failed-api"
+        title="Could not load Fairness Passport"
+        description={error ?? 'The server did not return a valid passport.'}
+        onRetry={() => {
+          setError(null);
+          setPassport(null);
+          setFetchNonce((n) => n + 1);
+        }}
+        retryLabel="Reload passport"
+      />
     );
   }
 
@@ -399,11 +449,22 @@ export default function FairnessPassport() {
               value={pct(km.max_disparity_score)}
               accent={(km.max_disparity_score ?? 0) > 0.3 ? 'text-rose-400' : (km.max_disparity_score ?? 0) > 0.1 ? 'text-amber-400' : 'text-emerald-400'}
             />
-            <MetricPill
-              label="Disparate Impact Ratio"
-              value={score(km.disparate_impact_ratio)}
-              accent="text-white"
-            />
+            <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 col-span-2">
+              <MetricStatus
+                label="Disparate Impact"
+                value={Number(km.disparate_impact_ratio) || 0}
+                threshold={0.8}
+                lowerIsWorse
+                tooltip="EEOC four-fifths legal threshold. Ratios below 0.80 may be non-compliant."
+              />
+              <MetricStatus
+                label="Max Disparity"
+                value={Number(km.max_disparity_score) || 0}
+                threshold={0.2}
+                tooltip="General fairness policy threshold. Scores above 0.20 indicate elevated risk."
+                className="mt-2"
+              />
+            </div>
             <MetricPill
               label="Groups Affected"
               value={String(km.affected_group_count ?? fm?.affected_groups?.length ?? 0)}
@@ -439,6 +500,58 @@ export default function FairnessPassport() {
               ))}
             </div>
           )}
+        </Section>
+
+        {/* ── Regulatory Snapshot ─────────────────────────────────────────── */}
+        <Section icon={<AlertTriangle size={16} />} title="Regulatory Snapshot">
+          <div
+            className={`rounded-2xl border p-5 space-y-4 ${
+              diViolation
+                ? 'bg-rose-500/10 border-rose-500/35'
+                : 'bg-emerald-500/10 border-emerald-500/30'
+            }`}
+          >
+            <div className="space-y-2">
+              <p className="text-sm font-bold text-slate-200">
+                Law: <span className="text-white">{regLaw}</span>
+              </p>
+              <p className="text-sm font-bold text-slate-200">
+                Metric: <span className="text-white">Disparate Impact = {diValue.toFixed(2)}</span>
+              </p>
+              <p className="text-sm font-bold text-slate-200">
+                Threshold: <span className="text-white">{diThreshold.toFixed(2)}</span>
+              </p>
+            </div>
+
+            <div
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-black uppercase tracking-wider ${
+                diViolation
+                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                  : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+              }`}
+            >
+              {diViolation ? (
+                <>
+                  <ShieldX size={14} /> ❌ Violation Detected
+                </>
+              ) : (
+                <>
+                  <ShieldCheck size={14} /> ✅ No Immediate Violation
+                </>
+              )}
+            </div>
+
+            <div className="space-y-2 text-sm">
+              <p className="text-slate-200">
+                <span className="font-black text-slate-400 uppercase text-[10px] tracking-widest mr-2">Explanation</span>
+                {regExplanation}
+              </p>
+              <p className="text-slate-200">
+                <span className="font-black text-slate-400 uppercase text-[10px] tracking-widest mr-2">Remediation</span>
+                {regRemediation}
+              </p>
+            </div>
+          </div>
         </Section>
 
         {/* ── Proxy Risks ────────────────────────────────────────────────── */}

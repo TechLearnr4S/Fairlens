@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { 
   AlertTriangle, 
   Search, 
@@ -23,6 +24,8 @@ import ProxyAiInsight from './ProxyAiInsight';
 import CorrelationHeatmap from './CorrelationHeatmap';
 import ProxyRiskBarChart from './ProxyRiskBarChart';
 import ProxyNetworkGraph from './ProxyNetworkGraph';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 export default function ProxyBiasHunter() {
   const { 
@@ -40,12 +43,15 @@ export default function ProxyBiasHunter() {
     removeColumn
   } = useAuditStore();
 
+  const [detectionError, setDetectionError] = useState(false);
+
   const runDetection = async () => {
     if (!jobId || !protectedAttributes.length) return;
 
+    setDetectionError(false);
     setIsProxyAnalyzing(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/proxy-risks`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/proxy-risks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -66,6 +72,7 @@ export default function ProxyBiasHunter() {
       }
     } catch (error) {
       console.error("Proxy detection failed:", error);
+      if (!isRequestTimeout(error)) setDetectionError(true);
     } finally {
       setIsProxyAnalyzing(false);
     }
@@ -86,8 +93,46 @@ export default function ProxyBiasHunter() {
     risk: r.risk_level
   }));
 
+  if (!jobId) {
+    return (
+      <div className="space-y-6">
+        <AuditEmptyState
+          variant="no-audit"
+          title="Proxy Bias Hunter"
+          description="Load an audit job to analyze proxy correlations and indirect discrimination risks."
+          className="glass-panel"
+        />
+      </div>
+    );
+  }
+
+  if (protectedAttributes.length === 0) {
+    return (
+      <div className="space-y-6">
+        <AuditEmptyState
+          variant="missing-data"
+          title="Protected attributes required"
+          description="Choose at least one sensitive attribute during audit setup so we can estimate proxy leakage."
+          cta={{ label: 'Configure audit', to: '/new-audit' }}
+          className="glass-panel"
+        />
+      </div>
+    );
+  }
+
   return (
     <div id="proxy-hunter" className="space-y-6">
+      {detectionError && (
+        <AuditEmptyState
+          variant="failed-api"
+          title="Proxy detection failed"
+          description="The analysis did not finish. Confirm the API is up, then retry."
+          onRetry={() => void runDetection()}
+          retryLabel="Retry detection"
+          compact
+          className="glass-panel border-rose-500/20"
+        />
+      )}
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -261,23 +306,15 @@ export default function ProxyBiasHunter() {
           </div>
         </div>
       ) : (
-        <div className="glass-panel p-12 flex flex-col items-center justify-center text-center space-y-4 border-dashed">
-          <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
-            <Search size={32} />
-          </div>
-          <div>
-            <h3 className="text-xl font-semibold text-white">No Proxy Risks Detected</h3>
-            <p className="text-slate-400 max-w-sm mt-2">
-              Run the detection engine to identify features that could be acting as surrogates for sensitive attributes.
-            </p>
-          </div>
-          <button 
-            onClick={runDetection}
-            className="text-primary-400 hover:text-primary-300 font-bold text-sm underline underline-offset-4"
-          >
-            Trigger analysis manually
-          </button>
-        </div>
+        <AuditEmptyState
+          variant="missing-data"
+          icon={Search}
+          title="Ready to scan for proxies"
+          description="Run the detection engine to score features that may leak protected attributes."
+          cta={{ label: 'Run proxy detection', onClick: () => void runDetection() }}
+          className="glass-panel border-dashed border-slate-600/50"
+          compact
+        />
       )}
 
       {/* Advanced Visualizations */}

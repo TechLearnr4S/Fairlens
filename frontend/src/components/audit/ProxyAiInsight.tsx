@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { Sparkles, AlertTriangle, ShieldCheck, Zap, Info, ListTodo } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 export default function ProxyAiInsight() {
   const { 
@@ -11,17 +14,21 @@ export default function ProxyAiInsight() {
     proxyRisks
   } = useAuditStore();
 
+  const [explainError, setExplainError] = useState(false);
+
   const handleExplain = async () => {
     if (!jobId) return;
+    setExplainError(false);
     setIsExplainingProxy(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/proxy-explain`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/proxy-explain`, {
         method: 'POST'
       });
       const data = await res.json();
       setProxyAiInsight(data);
     } catch (err) {
       console.error("AI Insight failed:", err);
+      if (!isRequestTimeout(err)) setExplainError(true);
     } finally {
       setIsExplainingProxy(false);
     }
@@ -52,6 +59,32 @@ export default function ProxyAiInsight() {
       return part;
     });
   };
+
+  if (!jobId) {
+    return (
+      <AuditEmptyState
+        variant="no-audit"
+        title="Proxy AI insight"
+        description="An active audit job is required to explain proxy risk patterns."
+        compact
+        className="glass-panel border-rose-500/15"
+      />
+    );
+  }
+
+  if (explainError && !proxyAiInsight && !isExplainingProxy) {
+    return (
+      <AuditEmptyState
+        variant="failed-api"
+        title="Could not generate proxy explanation"
+        description="The AI explanation service failed. Retry once the API is healthy."
+        onRetry={handleExplain}
+        retryLabel="Retry explanation"
+        compact
+        className="glass-panel border-rose-500/15"
+      />
+    );
+  }
 
   if (!proxyAiInsight && !isExplainingProxy) {
     return (

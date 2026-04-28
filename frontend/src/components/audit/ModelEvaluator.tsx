@@ -10,6 +10,8 @@ import {
   Tooltip, Cell, CartesianGrid, LineChart, Line,
   ScatterChart, Scatter, ZAxis
 } from 'recharts';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { AuditEmptyState } from '../ui/AuditEmptyState';
 
 export const ModelEvaluator: React.FC = () => {
   const { jobId, columns } = useAuditStore();
@@ -21,7 +23,7 @@ export const ModelEvaluator: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'metrics' | 'significance' | 'calibration' | 'policy'>('metrics');
   const [results, setResults] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [_error, setError] = useState<string | null>(null);
+  const [evalError, setEvalError] = useState<string | null>(null);
 
   const toggleAttr = (col: string) => {
     setSelectedAttrs(prev => 
@@ -32,9 +34,9 @@ export const ModelEvaluator: React.FC = () => {
   const runEvaluation = async () => {
     if (!jobId || !yTrue || !yPred || selectedAttrs.length === 0) return;
     setIsLoading(true);
-    setError(null);
+    setEvalError(null);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/model-evaluation`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/model-evaluation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -51,9 +53,9 @@ export const ModelEvaluator: React.FC = () => {
       });
       const data = await res.json();
       if (res.ok) setResults(data);
-      else setError(data.detail || 'Evaluation failed');
+      else setEvalError(data.detail || 'Evaluation failed');
     } catch (err) {
-      setError('Connection error');
+      if (!isRequestTimeout(err)) setEvalError('Connection error');
     } finally {
       setIsLoading(false);
     }
@@ -76,8 +78,34 @@ export const ModelEvaluator: React.FC = () => {
     size: data.metrics.size
   })) : [];
 
+  if (!jobId) {
+    return (
+      <AuditEmptyState
+        variant="no-audit"
+        title="Enterprise Fairness Auditor"
+        description="Run a dataset audit first, then map ground truth, predictions, and protected columns for formal metrics."
+        compact
+        className="glass-panel animate-in fade-in duration-700 rounded-3xl border-slate-700/50"
+      />
+    );
+  }
+
   return (
     <div className="glass-panel p-8 space-y-10 animate-in fade-in duration-700">
+      {evalError && (
+        <AuditEmptyState
+          variant="failed-api"
+          title="Evaluation failed"
+          description={evalError}
+          onRetry={() => {
+            setEvalError(null);
+            void runEvaluation();
+          }}
+          retryLabel="Retry evaluation"
+          compact
+          className="border-rose-500/25"
+        />
+      )}
       {/* Policy-First Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
         <div className="flex items-center gap-5">

@@ -24,7 +24,14 @@ logger = logging.getLogger(__name__)
 from fairness_engine import compute_disparities
 from proxy_detector import identify_proxies
 from llm_explainer import generate_fairness_explanation, generate_proxy_explanation
-from governance import generate_audit_receipt, generate_fairness_passport, build_fairness_passport, generate_narrative_summary
+from governance import (
+    generate_audit_receipt,
+    generate_fairness_passport,
+    build_fairness_passport,
+    generate_narrative_summary,
+    compute_regulatory_compliance,
+)
+from verdict_builder import build_verdict
 from fairness_evaluator import StatisticallyRigorousEvaluator
 from bias_simulator import simulate_mitigation_enhanced, optimize_fairness, generate_recommendation
 from correlation_engine import run_correlation_analysis, compute_proxy_risk
@@ -276,16 +283,20 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
 
     # Validate config
     try:
-        config_warnings = validate_audit_config(df, payload.target_column, payload.protected_attributes)
+        _config_warnings = validate_audit_config(df, payload.target_column, payload.protected_attributes)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     # Cache check
-    cache_params = {"target": payload.target_column, "protected": sorted(payload.protected_attributes)}
+    cache_params = {
+        "target": payload.target_column,
+        "protected": sorted(payload.protected_attributes),
+        "verdict_rev": "3",
+    }
     cached = cache_get(job_id, "audit_run", cache_params)
     if cached:
         logger.info("AUDIT_RUN cache hit | job_id=%s", job_id)
-        return {**cached, "cached": True}
+        return cached
 
     try:
         # Run fairness + proxy detection concurrently
@@ -300,10 +311,33 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
         )
         disparities, proxies = await asyncio.gather(disp_future, prox_future)
 
-        LOCAL_DATASTORE[job_id]["results"] = {"disparities": disparities, "proxies": proxies}
-        LOCAL_DATASTORE[job_id]["config"]  = {
+        prev_cfg = LOCAL_DATASTORE[job_id].get("config") or {}
+        merged_cfg = {
             "target":    payload.target_column,
             "protected": payload.protected_attributes,
+            "use_case":  prev_cfg.get("use_case", "Other"),
+        }
+        if prev_cfg.get("user_id") is not None:
+            merged_cfg["user_id"] = prev_cfg["user_id"]
+        LOCAL_DATASTORE[job_id]["config"] = merged_cfg
+
+        use_case = merged_cfg.get("use_case", "Other")
+        regulatory_results = compute_regulatory_compliance(use_case, disparities, proxies)
+        verdict = build_verdict(
+            {
+                "disparities": disparities,
+                "regulatory_results": regulatory_results,
+                "proxies": proxies,
+                "dataset": {"n_rows": len(df)},
+            },
+        )
+
+        LOCAL_DATASTORE[job_id]["results"] = {
+            "disparities": disparities,
+            "proxies": proxies,
+            "regulatory": regulatory_results,
+            "regulatory_compliance": regulatory_results,
+            "verdict": verdict,
         }
         LOCAL_DATASTORE[job_id]["analysis_time"] = datetime.utcnow().isoformat() + "Z"
         LOCAL_DATASTORE.sync(job_id)  # Persist updated results to Firestore
@@ -311,18 +345,23 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
         # Safe optional Firestore sync
         firestore_data = {
             "job_id": job_id,
-            "results": {"disparities": disparities, "proxies": proxies},
+            "results": {
+                "disparities": disparities,
+                "proxies": proxies,
+                "regulatory": regulatory_results,
+                "regulatory_compliance": regulatory_results,
+                "verdict": verdict,
+            },
             "config": LOCAL_DATASTORE[job_id]["config"],
             "analysis_time": LOCAL_DATASTORE[job_id]["analysis_time"],
         }
         threading.Thread(target=save_to_firestore_safe, args=("audits", job_id, firestore_data)).start()
 
         result = {
-            "status":     "success",
-            "job_id":     job_id,
             "disparities": disparities,
-            "proxies":    proxies,
-            "warnings":   config_warnings,
+            "regulatory": regulatory_results,
+            "proxies": proxies,
+            "verdict": verdict,
         }
         cache_set(job_id, "audit_run", result, cache_params)
 
@@ -353,6 +392,16 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
     except Exception as e:
         logger.error("AUDIT_RUN FAILED | job_id=%s error=%s", job_id, e)
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
+
+
+@app.get("/audits/{job_id}/verdict")
+async def get_audit_verdict(job_id: str):
+    """Return stored deterministic verdict from the last fairness run (or null)."""
+    if job_id not in LOCAL_DATASTORE:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    results = LOCAL_DATASTORE[job_id].get("results") or {}
+    return {"verdict": results.get("verdict")}
+
 
 @app.post("/audits/{job_id}/explain")
 async def explain_audit(job_id: str):

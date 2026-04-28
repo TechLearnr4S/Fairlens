@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { DemoSummaryPayload } from '../utils/demoSummary';
 
 interface AuditState {
   currentFile: File | null;
@@ -10,6 +11,10 @@ interface AuditState {
   protectedAttributes: string[];
   isUploading: boolean;
   disparities: any;
+  /** Deterministic fairness verdict from POST /audits/{id}/run */
+  verdict: Record<string, unknown> | null;
+  /** Guided demo only — from buildDemoSummary(disparities) */
+  demoSummary: DemoSummaryPayload | null;
   proxies: any[];
   explanation: any | null;
   aiInsight: any | null;
@@ -33,8 +38,12 @@ interface AuditState {
   setPreview: (data: any[]) => void;
   setTargetColumn: (col: string | null) => void;
   toggleProtectedAttribute: (col: string) => void;
+  /** Replace list, or merge by passing a function */
+  setProtectedAttributes: (cols: string[] | ((prev: string[]) => string[])) => void;
   setIsUploading: (status: boolean) => void;
   setDisparities: (data: any) => void;
+  setVerdict: (data: Record<string, unknown> | null) => void;
+  setDemoSummary: (data: DemoSummaryPayload | null) => void;
   setProxies: (data: any[]) => void;
   setExplanation: (data: any | null) => void;
   setAiInsight: (data: any | null) => void;
@@ -63,6 +72,8 @@ export const useAuditStore = create<AuditState>((set) => ({
   protectedAttributes: [],
   isUploading: false,
   disparities: null,
+  verdict: null,
+  demoSummary: null,
   proxies: [],
   explanation: null,
   aiInsight: null,
@@ -89,8 +100,15 @@ export const useAuditStore = create<AuditState>((set) => ({
       ? state.protectedAttributes.filter(attr => attr !== col)
       : [...state.protectedAttributes, col]
   })),
+  setProtectedAttributes: (cols) =>
+    set((state) => ({
+      protectedAttributes:
+        typeof cols === 'function' ? cols(state.protectedAttributes) : cols,
+    })),
   setIsUploading: (status) => set({ isUploading: status }),
   setDisparities: (data) => set({ disparities: data }),
+  setVerdict: (data) => set({ verdict: data }),
+  setDemoSummary: (data) => set({ demoSummary: data }),
   setProxies: (data) => set({ proxies: data }),
   setExplanation: (data) => set({ explanation: data }),
   setAiInsight: (data) => set({ aiInsight: data }),
@@ -119,6 +137,8 @@ export const useAuditStore = create<AuditState>((set) => ({
     protectedAttributes: [],
     isUploading: false,
     disparities: null,
+    verdict: null,
+    demoSummary: null,
     proxies: [],
     proxyRisks: [],
     proxySummary: null,

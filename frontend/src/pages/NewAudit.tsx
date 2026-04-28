@@ -1,13 +1,14 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { 
-  UploadCloud, CheckCircle, ArrowRight, ArrowLeft, Loader, Table, 
+  UploadCloud, CheckCircle, ArrowRight, ArrowLeft, Loader,
   Shield, Target, AlertCircle, Briefcase, CreditCard, HeartPulse, 
   Scale, LayoutGrid, Play
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuditStore } from '../store/auditStore';
 import { auth } from '../firebase';
-import { ToastContainer, type ToastType } from '../components/ui/Toast';
+import { useToast } from '../components/providers/ToastProvider';
+import { apiFetch, isRequestTimeout } from '../utils/apiFetch';
 
 const USE_CASES = [
   { id: 'Hiring', icon: Briefcase, title: 'Hiring / Recruitment', desc: 'EEOC guidelines & 4/5ths Rule' },
@@ -16,6 +17,25 @@ const USE_CASES = [
   { id: 'Criminal Justice', icon: Scale, title: 'Criminal Justice', desc: '14th Amend. / ProPublica' },
   { id: 'Other', icon: LayoutGrid, title: 'Other / General', desc: 'Standard fairness metrics' },
 ];
+
+/** Token match for sex | gender | race | ethnicity in column names (case-insensitive tokens, e.g. `applicant_race`). */
+const DATASET_RECOMMENDED_TOKENS = new Set([
+  'sex', 'sexes', 'gender', 'genders', 'race', 'races', 'ethnicity', 'ethnicities',
+]);
+
+function columnMatchesDatasetRecommendation(columnName: string): boolean {
+  const tokens = columnName
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return tokens.some(
+    (t) => DATASET_RECOMMENDED_TOKENS.has(t) || t.startsWith('ethnic'),
+  );
+}
+
+function listDatasetRecommendedColumns(columnsList: string[]): string[] {
+  return columnsList.filter(columnMatchesDatasetRecommendation);
+}
 
 const getSmartBadge = (col: string) => {
   const lower = col.toLowerCase();
@@ -30,6 +50,7 @@ const getSmartBadge = (col: string) => {
 
 export default function NewAudit() {
   const navigate = useNavigate();
+  const { addToast } = useToast();
   const { 
     currentFile, setFile, 
     columns, setColumns, 
@@ -37,9 +58,9 @@ export default function NewAudit() {
     preview, setPreview,
     isUploading, setIsUploading, 
     targetColumn, setTargetColumn, 
-    protectedAttributes, toggleProtectedAttribute, 
+    protectedAttributes, toggleProtectedAttribute, setProtectedAttributes,
     jobId, setJobId, 
-    setDisparities, setProxies, setExplanation 
+    setDisparities, setVerdict, setProxies, setExplanation, setDemoSummary
   } = useAuditStore();
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,21 +68,31 @@ export default function NewAudit() {
   const [isDragging, setIsDragging] = useState(false);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
-  const [toasts, setToasts] = useState<{id: string, message: string, type: ToastType}[]>([]);
   
   // Wizard State
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [useCase, setUseCase] = useState<string>('');
   const [groundTruthColumn, setGroundTruthColumn] = useState<string | null>(null);
+  const step2RecommendationSeeded = useRef(false);
 
-  const addToast = (message: string, type: ToastType = 'info') => {
-    const id = Math.random().toString(36).substr(2, 9);
-    setToasts(prev => [...prev, { id, message, type }]);
-  };
+  const recommendedColumnSet = useMemo(() => {
+    const rec = listDatasetRecommendedColumns(columns);
+    return new Set(rec);
+  }, [columns]);
 
-  const removeToast = (id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
+  useEffect(() => {
+    if (currentStep < 2) {
+      step2RecommendationSeeded.current = false;
+      return;
+    }
+    if (currentStep !== 2 || step2RecommendationSeeded.current || columns.length === 0) return;
+
+    const recommended = listDatasetRecommendedColumns(columns);
+    step2RecommendationSeeded.current = true;
+    if (recommended.length === 0) return;
+
+    setProtectedAttributes((prev) => [...new Set([...prev, ...recommended])]);
+  }, [currentStep, columns, setProtectedAttributes]);
 
   const handleFile = async (file: File) => {
     if (!file.name.endsWith('.csv')) {
@@ -78,7 +109,7 @@ export default function NewAudit() {
     formData.append('file', file);
 
     try {
-      const res = await fetch('http://localhost:8000/audits/upload', {
+      const res = await apiFetch('http://localhost:8000/audits/upload', {
         method: 'POST',
         body: formData,
       });
@@ -93,6 +124,7 @@ export default function NewAudit() {
       }
     } catch (error) {
       console.error(error);
+      if (isRequestTimeout(error)) return;
       addToast("Failed to parse CSV via backend.", 'error');
     } finally {
       setIsUploading(false);
@@ -120,7 +152,7 @@ export default function NewAudit() {
 
     setIsConfigSaving(true);
     try {
-      await fetch('http://localhost:8000/audits/config', {
+      await apiFetch('http://localhost:8000/audits/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,10 +174,11 @@ export default function NewAudit() {
 
   const startAudit = async () => {
     await handleConfigSave();
-    
+    setDemoSummary(null);
+
     setIsRunning(true);
     try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/run`, {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -158,11 +191,13 @@ export default function NewAudit() {
       if (data.disparities) {
          setDisparities(data.disparities);
          setProxies(data.proxies || []);
+         setVerdict(data.verdict ?? null);
          setExplanation(data.explanation || null);
          navigate('/');
       }
     } catch (error) {
        console.error("Audit run failed:", error);
+       if (isRequestTimeout(error)) return;
        addToast("Error running audit. Check console.", 'error');
     } finally {
        setIsRunning(false);
@@ -237,7 +272,14 @@ export default function NewAudit() {
           <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400 tracking-tight">
             New Fairness Audit
           </h1>
-          <p className="text-slate-400 mt-2 font-medium">Diagnose hidden bias and subgroup disparities.</p>
+          <p className="text-slate-400 mt-2 font-medium flex items-center gap-2">
+            Diagnose hidden bias and subgroup disparities.
+            {currentStep > 0 && (
+              <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-black tracking-widest border border-indigo-500/20">
+                Step {currentStep}/4
+              </span>
+            )}
+          </p>
         </div>
         {currentStep > 0 && (
           <button onClick={resetAll} className="text-sm text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1 bg-dark-800 px-3 py-1.5 rounded-lg border border-slate-700">
@@ -245,6 +287,7 @@ export default function NewAudit() {
           </button>
         )}
       </header>
+
 
       {/* Stepper Header */}
       {currentStep > 0 && (
@@ -345,15 +388,23 @@ export default function NewAudit() {
           <div className="mb-8 text-center">
             <h2 className="text-2xl font-bold text-white mb-2">Who could be affected unfairly?</h2>
             <p className="text-slate-400">Select the sensitive or protected attributes you want to audit for discrimination.</p>
+            <p className="text-slate-500 text-sm mt-3 max-w-xl mx-auto">
+              Columns named <span className="text-slate-400 font-mono text-xs">sex</span>,{' '}
+              <span className="text-slate-400 font-mono text-xs">gender</span>,{' '}
+              <span className="text-slate-400 font-mono text-xs">race</span>, or{' '}
+              <span className="text-slate-400 font-mono text-xs">ethnicity</span> are pre-selected when present. You can toggle any row.
+            </p>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
             {columns.map(col => {
               const badge = getSmartBadge(col);
+              const isDatasetRecommended = recommendedColumnSet.has(col);
               const isSelected = protectedAttributes.includes(col);
               return (
                 <button 
                   key={col}
+                  type="button"
                   onClick={() => toggleProtectedAttribute(col)}
                   className={`flex flex-col px-5 py-4 rounded-xl border transition-all text-left ${
                     isSelected 
@@ -361,14 +412,19 @@ export default function NewAudit() {
                       : 'bg-dark-800 border-slate-700 hover:border-slate-500'
                   }`}
                 >
-                  <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center justify-between w-full gap-2">
                     <span className={`font-bold ${isSelected ? 'text-indigo-400' : 'text-slate-300'}`}>{col}</span>
-                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${isSelected ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-600'}`}>
+                    <div className={`w-5 h-5 shrink-0 rounded-full border flex items-center justify-center ${isSelected ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-600'}`}>
                       {isSelected && <CheckCircle size={12} />}
                     </div>
                   </div>
+                  {isDatasetRecommended && (
+                    <p className="mt-2 text-[11px] font-semibold text-emerald-400/90">
+                      Recommended based on dataset
+                    </p>
+                  )}
                   {badge && (
-                    <div className="mt-2 flex">
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       <span className={`text-[10px] uppercase font-black tracking-wider px-2 py-1 rounded border ${badge.color}`}>
                         {badge.label}
                       </span>
@@ -509,7 +565,6 @@ export default function NewAudit() {
         </div>
       )}
 
-      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

@@ -54,9 +54,6 @@ logger = logging.getLogger(__name__)
 GENESIS_HASH = "GENESIS"
 COLLECTION = "audit_logs"
 
-# In-memory fallback for local demos / non-cloud environments
-GLOBAL_LOG_CACHE: dict[str, list[dict]] = {}
-
 
 # ---------------------------------------------------------------------------
 # Hashing
@@ -180,21 +177,12 @@ def append_audit_log(
     except Exception as e:
         # Reduced from error to debug to clean up terminal noise for local demos
         logger.debug(
-            "audit_log | Firestore unavailable, using local memory cache for audit_id=%s",
-            audit_id
+            "audit_log append SKIPPED (Cloud Unavailable) for audit_id=%s action=%s: %s",
+            audit_id, action, e,
         )
-        
-        # Determine previous hash from local cache
-        local_chain = GLOBAL_LOG_CACHE.get(audit_id, [])
-        prev_hash = local_chain[-1]["hash"] if local_chain else GENESIS_HASH
-        
-        # Build and store in local cache
-        entry = _build_entry(audit_id, action, safe_metadata, prev_hash)
-        if audit_id not in GLOBAL_LOG_CACHE:
-            GLOBAL_LOG_CACHE[audit_id] = []
-        GLOBAL_LOG_CACHE[audit_id].append(entry)
-        
-        return entry
+        # Return an in-memory entry so callers can still reference it
+        prev_hash = GENESIS_HASH
+        return _build_entry(audit_id, action, safe_metadata, prev_hash)
 
 
 def get_audit_chain(audit_id: str) -> list[dict]:
@@ -216,8 +204,8 @@ def get_audit_chain(audit_id: str) -> list[dict]:
         )
         return [doc.to_dict() for doc in query.stream()]
     except Exception as e:
-        logger.debug("get_audit_chain | Firestore unavailable, falling back to local cache.")
-        return GLOBAL_LOG_CACHE.get(audit_id, [])
+        logger.error("get_audit_chain failed for audit_id=%s: %s", audit_id, e)
+        return []
 
 
 def verify_chain(entries: list[dict]) -> dict:

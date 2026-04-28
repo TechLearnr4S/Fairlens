@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuditStore } from '../../store/auditStore';
 import { Check, ArrowRight } from 'lucide-react';
 
 export const AuditStepper: React.FC = () => {
   const { jobId, disparities, simulation, proxies } = useAuditStore();
+  const navigate = useNavigate();
 
   const steps = [
     { id: 'upload', label: 'Upload', desc: 'Dataset Intake' },
@@ -53,6 +55,14 @@ export const AuditStepper: React.FC = () => {
     } else {
       const el = document.getElementById(id);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const handleAction = () => {
+    if (nextBestAction.action === "Open Sandbox") {
+      navigate("/sandbox");
+    } else {
+      scrollToSection(nextBestAction.target);
     }
   };
 
@@ -121,7 +131,7 @@ export const AuditStepper: React.FC = () => {
           </div>
         </div>
         <button 
-          onClick={() => scrollToSection(nextBestAction.target)}
+          onClick={handleAction}
           className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 group whitespace-nowrap"
         >
           {nextBestAction.action}

@@ -172,10 +172,14 @@ async def upload_dataset(file: UploadFile = File(...)):
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
     
-    contents = await file.read()
+    # Try parsing with UTF-8, then fallback to Latin-1
     try:
-        df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
+        try:
+            df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
+        except UnicodeDecodeError:
+            df = pd.read_csv(io.StringIO(contents.decode("latin-1")))
     except Exception as e:
+        logger.error("CSV Parse Error: %s", e)
         raise HTTPException(status_code=400, detail=f"CSV parse error: {e}")
 
     # Validate dataset

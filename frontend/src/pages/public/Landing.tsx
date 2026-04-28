@@ -44,7 +44,7 @@ export default function Landing() {
             </Link>
             <Link to="/login">
               <Button size="lg" variant="outline">
-                View Demo
+                Sign In
               </Button>
             </Link>
           </div>

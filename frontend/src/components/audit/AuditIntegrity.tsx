@@ -173,7 +173,7 @@ export default function AuditIntegrity() {
 
   const handleTamper = async () => {
     if (!jobId) return;
-    if (!window.confirm("Warning: This will maliciously modify the local database to demonstrate integrity failure. Proceed?")) return;
+    if (!window.confirm("Warning: This will maliciously modify the local database to show integrity failure. Proceed?")) return;
     
     setLoading(true);
     try {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, UploadCloud, Users, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, UploadCloud, AlertTriangle } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 import { apiFetch } from '../../utils/apiFetch';
 import { VerdictCard, type VerdictPayload } from '../../components/audit/VerdictCard';
@@ -12,9 +12,8 @@ import {
 import FairnessCopilot from '../../components/audit/FairnessCopilot';
 import ProxyBiasHunter from '../../components/audit/ProxyBiasHunter';
 import FairnessPassport from '../../components/audit/FairnessPassport';
-import { DemoSummaryBanner } from '../../components/audit/DemoSummaryBanner';
+import { ImpactSummaryBanner } from '../../components/audit/ImpactSummaryBanner';
 import { WhyThisMatters } from '../../components/audit/WhyThisMatters';
-import { AuditEmptyState } from '../../components/ui/AuditEmptyState';
 import { ImpactMetrics } from '../../components/audit/ImpactMetrics';
 import { MetricStatus } from '../../components/ui/MetricStatus';
 
@@ -46,7 +45,7 @@ export default function Dashboard() {
     jobId,
     simulation,
     verdict: storeVerdict,
-    demoSummary,
+    auditSummary,
   } = useAuditStore();
 
   const [summary, setSummary] = useState<string | null>(null);
@@ -105,10 +104,10 @@ export default function Dashboard() {
       ? Math.max(0, Number(simulation.after.disparity) * 100)
       : beforeDisparityPercent;
     const disparityGap = Math.max(0, Number(worst?.score) || 0);
-    const impactTotalRows = demoSummary?.total_rows ?? totalRows;
-    const impactSubgroupSize = demoSummary?.affected_count ?? subgroupSize;
-    const impactDisparityGap = demoSummary?.disparity_gap ?? disparityGap;
-    const impactAffectedGroup = demoSummary?.group ?? demoSummary?.impacted_group ?? affectedGroup;
+    const impactTotalRows = auditSummary?.total_rows ?? totalRows;
+    const impactSubgroupSize = auditSummary?.affected_count ?? subgroupSize;
+    const impactDisparityGap = auditSummary?.disparity_gap ?? disparityGap;
+    const impactAffectedGroup = auditSummary?.group ?? auditSummary?.impacted_group ?? affectedGroup;
 
     const displayVerdict = parseVerdict(storeVerdict);
     const showVerdictSkeleton = isVerdictLoading && !displayVerdict;
@@ -157,21 +156,21 @@ export default function Dashboard() {
           ) : null}
         </section>
 
-        {/* 2) DemoSummaryBanner */}
-        {demoSummary && (
+        {/* 2) ImpactSummaryBanner */}
+        {auditSummary && (
           <section className="border-t border-slate-800/70 pt-6">
-            <DemoSummaryBanner
-              disparity_score={demoSummary.disparity}
-              impacted_group={demoSummary.group ?? demoSummary.impacted_group}
-              law={demoSummary.law}
-              affected_count={demoSummary.affected ?? demoSummary.affected_count}
-              improved_count={demoSummary.improved_count}
+            <ImpactSummaryBanner
+              disparity_score={auditSummary.disparity}
+              impacted_group={auditSummary.group ?? auditSummary.impacted_group}
+              law={auditSummary.law}
+              affected_count={auditSummary.affected ?? auditSummary.affected_count}
+              improved_count={auditSummary.improved_count}
             />
           </section>
         )}
 
         {/* 3) WhyThisMatters */}
-        {demoSummary && (
+        {auditSummary && (
           <section className="border-t border-slate-800/70 pt-6">
             <WhyThisMatters />
           </section>
@@ -287,31 +286,11 @@ export default function Dashboard() {
   return <DashboardEmptyState />;
 }
 
-// ── Recent Audits empty state ─────────────────────────────────────────────────
+// ── Manual audit empty state ──────────────────────────────────────────────────
 
 function DashboardEmptyState() {
-  const { setJobId } = useAuditStore();
-  const [recentAudits, setRecentAudits] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [recentError, setRecentError] = useState(false);
-  const [recentRetryNonce, setRecentRetryNonce] = useState(0);
-
-  useEffect(() => {
-    setLoading(true);
-    setRecentError(false);
-    apiFetch('http://localhost:8000/audits/recent')
-      .then(r => r.ok ? r.json() : Promise.reject(new Error('recent')))
-      .then(d => setRecentAudits(d.audits || []))
-      .catch(() => {
-        setRecentAudits([]);
-        setRecentError(true);
-      })
-      .finally(() => setLoading(false));
-  }, [recentRetryNonce]);
-
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Header */}
       <header className="flex justify-between items-start">
         <div>
           <h1 className="text-4xl font-black text-white tracking-tight">FairLens Studio</h1>
@@ -322,95 +301,32 @@ function DashboardEmptyState() {
         </Link>
       </header>
 
-      {/* Recent Audits */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16 text-slate-500 gap-3">
-          <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm font-medium">Checking Firestore for recent audits...</span>
+      <div className="glass-panel rounded-3xl border border-slate-700/50 bg-slate-900/40 py-20 px-8 text-center space-y-6">
+        <div className="w-20 h-20 rounded-3xl bg-indigo-500/10 flex items-center justify-center mx-auto border border-indigo-500/20">
+          <UploadCloud size={34} className="text-indigo-400" />
         </div>
-      ) : recentError && recentAudits.length === 0 ? (
-        <AuditEmptyState
-          variant="failed-api"
-          title="Could not load recent audits"
-          description="The server did not return your saved audits. Confirm the API is running, then try again."
-          onRetry={() => setRecentRetryNonce((n) => n + 1)}
-          retryLabel="Retry"
-          className="glass-panel max-w-xl mx-auto"
-        />
-      ) : recentAudits.length > 0 ? (
-        <div className="space-y-4">
-          <h2 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em]">
-            Recent Audits — Restored from Cloud
-          </h2>
-          <div className="grid gap-3">
-            {recentAudits.map(a => (
-              <div
-                key={a.job_id}
-                className="glass-panel p-5 rounded-2xl flex items-center justify-between gap-4 hover:border-indigo-500/30 transition-all group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center shrink-0">
-                    <ShieldCheck size={18} className="text-indigo-400" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-white text-sm">{a.filename}</p>
-                    <p className="text-slate-500 text-xs mt-0.5">
-                      {a.row_count.toLocaleString()} rows
-                      {a.config?.target && <> · Target: <span className="text-indigo-400">{a.config.target}</span></>}
-                      {a.config?.protected?.length > 0 && <> · Protected: {a.config.protected.join(', ')}</>}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  {a.has_results && (
-                    <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-full">
-                      Results Available
-                    </span>
-                  )}
-                  <button
-                    onClick={() => setJobId(a.job_id)}
-                    className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-xs font-black rounded-xl transition-all uppercase tracking-widest group-hover:border-indigo-500/60"
-                  >
-                    Resume
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="text-center py-20 space-y-4">
-          <div className="w-20 h-20 rounded-3xl bg-slate-800/50 flex items-center justify-center mx-auto border border-slate-700">
-            <Users size={32} className="text-slate-600" />
-          </div>
-          <div>
-            <p className="text-slate-400 font-bold">No audits yet</p>
-            <p className="text-slate-600 text-sm mt-1">Upload a CSV to start your first fairness audit</p>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-4">
-            <Link 
-              to="/new-audit" 
-              className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold transition-all hover:scale-105 active:scale-95"
-            >
-              New Audit
-            </Link>
-            <button 
-              onClick={() => {
-                const demoBtn = Array.from(document.querySelectorAll('button')).find(btn => 
-                  btn.textContent?.includes('Start Guided Demo') || btn.textContent?.includes('Presenting')
-                );
-                if (demoBtn) demoBtn.click();
-              }}
-              className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20 hover:scale-105 active:scale-95"
-            >
-              <UploadCloud size={16} /> Try Live Demo
-            </button>
-          </div>
-          <p className="text-slate-500 text-xs mt-2">Run a sample audit in seconds</p>
+        <div className="space-y-2">
+          <p className="text-xl text-white font-black">No audits yet.</p>
+          <p className="text-slate-400 text-sm">
+            Upload a dataset to start your first fairness audit.
+          </p>
         </div>
 
-      )}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <Link
+            to="/new-audit"
+            className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20 hover:scale-105 active:scale-95"
+          >
+            <UploadCloud size={16} /> Upload CSV
+          </Link>
+          <Link
+            to="/new-audit"
+            className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold transition-all hover:scale-105 active:scale-95"
+          >
+            New Audit
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

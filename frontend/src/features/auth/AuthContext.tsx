@@ -31,7 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           id: firebaseUser.uid,
           email: firebaseUser.email || '',
           name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-          role: 'auditor' // Hardcoded for demo/hackathon unless using custom claims
+          role: 'auditor' // Hardcoded for hackathon unless using custom claims
         });
       } else {
         setUser(null);

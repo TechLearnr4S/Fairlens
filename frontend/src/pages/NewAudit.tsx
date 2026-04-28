@@ -9,6 +9,25 @@ import { useAuditStore } from '../store/auditStore';
 import { auth } from '../firebase';
 import { useToast } from '../components/providers/ToastProvider';
 import { apiFetch, isRequestTimeout } from '../utils/apiFetch';
+import { buildAuditSummary } from '../utils/auditSummary';
+
+async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const data = await response.clone().json();
+    const detail = data?.detail ?? data?.message ?? data?.error;
+    if (Array.isArray(detail)) return detail.map((d) => d?.msg || JSON.stringify(d)).join(', ');
+    if (typeof detail === 'string') return detail;
+    if (detail) return JSON.stringify(detail);
+  } catch {
+    try {
+      const text = await response.clone().text();
+      if (text) return text;
+    } catch {
+      // ignore parse fallback
+    }
+  }
+  return fallback;
+}
 
 const USE_CASES = [
   { id: 'Hiring', icon: Briefcase, title: 'Hiring / Recruitment', desc: 'EEOC guidelines & 4/5ths Rule' },
@@ -60,7 +79,7 @@ export default function NewAudit() {
     targetColumn, setTargetColumn, 
     protectedAttributes, toggleProtectedAttribute, setProtectedAttributes,
     jobId, setJobId, 
-    setDisparities, setVerdict, setProxies, setExplanation, setDemoSummary
+    setDisparities, setVerdict, setProxies, setExplanation, setAuditSummary
   } = useAuditStore();
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +132,10 @@ export default function NewAudit() {
         method: 'POST',
         body: formData,
       });
+      console.log('Upload response', res);
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, 'Failed to upload CSV.'));
+      }
       const data = await res.json();
       if (data.columns) {
         setColumns(data.columns);
@@ -125,7 +148,7 @@ export default function NewAudit() {
     } catch (error) {
       console.error(error);
       if (isRequestTimeout(error)) return;
-      addToast("Failed to parse CSV via backend.", 'error');
+      addToast(error instanceof Error ? error.message : "Failed to parse CSV via backend.", 'error');
     } finally {
       setIsUploading(false);
     }
@@ -152,53 +175,68 @@ export default function NewAudit() {
 
     setIsConfigSaving(true);
     try {
-      await apiFetch('http://localhost:8000/audits/config', {
+      const configRes = await apiFetch('http://localhost:8000/audits/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           job_id: jobId,
           user_id: auth.currentUser?.uid || "anonymous",
           target: targetColumn,
+          target_column: targetColumn,
           protected_attributes: protectedAttributes,
           filename: currentFile?.name,
           file_url: fileUrl,
           use_case: useCase || 'Other'
         })
       });
+      console.log('Config response', configRes);
+      if (!configRes.ok) {
+        throw new Error(await getApiErrorMessage(configRes, 'Failed to save audit configuration.'));
+      }
     } catch (error) {
       console.error("Config save failed:", error);
+      throw error;
     } finally {
       setIsConfigSaving(false);
     }
   };
 
   const startAudit = async () => {
-    await handleConfigSave();
-    setDemoSummary(null);
-
     setIsRunning(true);
     try {
+      if (!jobId || !targetColumn || protectedAttributes.length === 0) {
+        throw new Error('Select a target column and at least one protected attribute before running the audit.');
+      }
+      await handleConfigSave();
+      setAuditSummary(null);
+
       const res = await apiFetch(`http://localhost:8000/audits/${jobId}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target_column: targetColumn,
           protected_attributes: protectedAttributes,
+          use_case: useCase || 'Other',
           ground_truth_column: groundTruthColumn
         })
       });
+      console.log('Audit run response', res);
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, 'Audit run failed.'));
+      }
       const data = await res.json();
       if (data.disparities) {
          setDisparities(data.disparities);
          setProxies(data.proxies || []);
          setVerdict(data.verdict ?? null);
+         setAuditSummary(buildAuditSummary(data.disparities));
          setExplanation(data.explanation || null);
          navigate('/');
       }
     } catch (error) {
        console.error("Audit run failed:", error);
        if (isRequestTimeout(error)) return;
-       addToast("Error running audit. Check console.", 'error');
+       addToast(error instanceof Error ? error.message : 'Audit run failed.', 'error');
     } finally {
        setIsRunning(false);
     }

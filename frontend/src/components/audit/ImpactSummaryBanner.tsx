@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, TrendingDown } from 'lucide-react';
 import { MetricStatus } from '../ui/MetricStatus';
 
-interface DemoSummaryBannerProps {
+interface ImpactSummaryBannerProps {
   disparity_score: number | string;
   impacted_group: string;
   law: string;
@@ -10,19 +10,17 @@ interface DemoSummaryBannerProps {
   improved_count?: number | string;
 }
 
-export const DemoSummaryBanner: React.FC<DemoSummaryBannerProps> = ({
+export const ImpactSummaryBanner: React.FC<ImpactSummaryBannerProps> = ({
   disparity_score,
   impacted_group,
   law,
   affected_count,
   improved_count
 }) => {
-  // Parse disparity score to number if it's a string
   const score = typeof disparity_score === 'string' ? parseFloat(disparity_score) : disparity_score;
-  
-  // Determine severity based on disparate impact score
+
   let severity: 'low' | 'medium' | 'high' | 'critical' = 'medium';
-  if (isNaN(score)) severity = 'high'; // Default if unparseable
+  if (isNaN(score)) severity = 'high';
   else if (score < 0.5) severity = 'critical';
   else if (score < 0.8) severity = 'high';
   else if (score < 0.9) severity = 'medium';
@@ -30,28 +28,28 @@ export const DemoSummaryBanner: React.FC<DemoSummaryBannerProps> = ({
 
   const severityConfig = {
     critical: {
-      title: '🚨 Critical Risk Detected',
+      title: 'Critical Risk Detected',
       color: 'from-red-600/20 to-rose-600/5',
       borderColor: 'border-red-500/30',
       textColor: 'text-red-400',
       icon: <AlertCircle className="text-red-400 animate-pulse" size={24} />
     },
     high: {
-      title: '🚨 High Risk Detected',
+      title: 'High Risk Detected',
       color: 'from-orange-600/20 to-amber-600/5',
       borderColor: 'border-orange-500/30',
       textColor: 'text-orange-400',
       icon: <AlertTriangle className="text-orange-400 animate-pulse" size={24} />
     },
     medium: {
-      title: '⚠️ Medium Risk Detected',
+      title: 'Medium Risk Detected',
       color: 'from-yellow-600/20 to-amber-600/5',
       borderColor: 'border-yellow-500/30',
       textColor: 'text-yellow-400',
       icon: <AlertTriangle className="text-yellow-400" size={24} />
     },
     low: {
-      title: '✅ Low Risk Detected',
+      title: 'Low Risk Detected',
       color: 'from-emerald-600/20 to-green-600/5',
       borderColor: 'border-emerald-500/30',
       textColor: 'text-emerald-400',
@@ -63,14 +61,13 @@ export const DemoSummaryBanner: React.FC<DemoSummaryBannerProps> = ({
 
   return (
     <div className={`glass-panel p-6 rounded-2xl border ${current.borderColor} bg-gradient-to-br ${current.color} shadow-2xl relative overflow-hidden transition-all duration-500 hover:scale-[1.02]`}>
-      {/* Background Glow Effect */}
       <div className="absolute -right-12 -top-12 w-40 h-40 bg-gradient-to-br from-slate-400/10 to-transparent blur-3xl rounded-full pointer-events-none" />
 
       <div className="flex items-start gap-4">
         <div className="p-3 rounded-xl bg-slate-900/50 border border-slate-700/30 shadow-inner shrink-0">
           {current.icon}
         </div>
-        
+
         <div className="flex-1 space-y-3">
           <div>
             <h3 className={`text-sm font-black uppercase tracking-widest ${current.textColor} flex items-center gap-2`}>
@@ -91,7 +88,7 @@ export const DemoSummaryBanner: React.FC<DemoSummaryBannerProps> = ({
             />
 
             <div className="flex items-center gap-2">
-              <span className="text-slate-500">→</span>
+              <span className="text-slate-500">-&gt;</span>
               <span>Violates</span>
               <span className="font-bold text-white bg-slate-900/40 px-2 py-0.5 rounded border border-slate-800 text-xs">
                 {law}
@@ -102,7 +99,7 @@ export const DemoSummaryBanner: React.FC<DemoSummaryBannerProps> = ({
           <div className="flex items-center gap-2 pt-2 border-t border-slate-700/20 mt-2">
             <TrendingDown className="text-slate-400" size={16} />
             <p className="text-xs font-bold text-slate-400">
-              📉 ~<span className="text-white font-black">{typeof affected_count === 'number' ? affected_count.toLocaleString() : affected_count}</span> affected
+              ~<span className="text-white font-black">{typeof affected_count === 'number' ? affected_count.toLocaleString() : affected_count}</span> affected
             </p>
             {improved_count != null && (
               <p className="text-xs font-bold text-emerald-300 ml-2">
@@ -116,4 +113,4 @@ export const DemoSummaryBanner: React.FC<DemoSummaryBannerProps> = ({
   );
 };
 
-export default DemoSummaryBanner;
+export default ImpactSummaryBanner;

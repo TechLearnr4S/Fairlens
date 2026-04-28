@@ -55,7 +55,7 @@ Every action in the audit lifecycle is recorded in a **hash-chained, digitally s
 - SHA-256 chain: each entry commits to the hash of the previous entry (blockchain-style, no gaps)
 - **Ed25519 digital signatures** on every entry — server identity is cryptographically provable
 - Full verification engine: hash integrity + chain linkage + signature validity, per entry
-- Tamper-detection demo mode: simulate a breach, watch the chain break
+- Tamper-detection tool: simulate a breach, watch the chain break
 
 ---
 
@@ -117,9 +117,9 @@ npm run dev
 
 ---
 
-## 📂 Suggested Demo Dataset
+## 📂 Suggested Dataset
 
-Use the **UCI Adult Income dataset** — a public dataset where income prediction (>50K/year) produces well-documented gender and race disparities. Perfect for demonstrating all FairLens features.
+Use any CSV with a clear prediction target and protected attributes. Public datasets such as UCI Adult Income can work well for local testing.
 
 Columns to use:
 - **Target:** `income` (predict high vs. low income)

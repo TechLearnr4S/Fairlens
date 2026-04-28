@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DemoSummaryPayload } from '../utils/demoSummary';
+import type { AuditSummaryPayload } from '../utils/auditSummary';
 
 interface AuditState {
   currentFile: File | null;
@@ -13,8 +13,7 @@ interface AuditState {
   disparities: any;
   /** Deterministic fairness verdict from POST /audits/{id}/run */
   verdict: Record<string, unknown> | null;
-  /** Guided demo only — from buildDemoSummary(disparities) */
-  demoSummary: DemoSummaryPayload | null;
+  auditSummary: AuditSummaryPayload | null;
   proxies: any[];
   explanation: any | null;
   aiInsight: any | null;
@@ -43,7 +42,7 @@ interface AuditState {
   setIsUploading: (status: boolean) => void;
   setDisparities: (data: any) => void;
   setVerdict: (data: Record<string, unknown> | null) => void;
-  setDemoSummary: (data: DemoSummaryPayload | null) => void;
+  setAuditSummary: (data: AuditSummaryPayload | null) => void;
   setProxies: (data: any[]) => void;
   setExplanation: (data: any | null) => void;
   setAiInsight: (data: any | null) => void;
@@ -73,7 +72,7 @@ export const useAuditStore = create<AuditState>((set) => ({
   isUploading: false,
   disparities: null,
   verdict: null,
-  demoSummary: null,
+  auditSummary: null,
   proxies: [],
   explanation: null,
   aiInsight: null,
@@ -108,7 +107,7 @@ export const useAuditStore = create<AuditState>((set) => ({
   setIsUploading: (status) => set({ isUploading: status }),
   setDisparities: (data) => set({ disparities: data }),
   setVerdict: (data) => set({ verdict: data }),
-  setDemoSummary: (data) => set({ demoSummary: data }),
+  setAuditSummary: (data) => set({ auditSummary: data }),
   setProxies: (data) => set({ proxies: data }),
   setExplanation: (data) => set({ explanation: data }),
   setAiInsight: (data) => set({ aiInsight: data }),
@@ -138,7 +137,7 @@ export const useAuditStore = create<AuditState>((set) => ({
     isUploading: false,
     disparities: null,
     verdict: null,
-    demoSummary: null,
+    auditSummary: null,
     proxies: [],
     proxyRisks: [],
     proxySummary: null,

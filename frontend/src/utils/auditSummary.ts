@@ -1,20 +1,12 @@
-/**
- * Auto-built demo headline metrics for Guided Demo (no user input).
- * Uses hiring-style disparate impact ratio (minority/reference selection rates).
- */
 import { computeImpactMetrics } from './impact';
 
-export type DemoSummaryPayload = {
-  /** Simple consumer-facing alias for banner copy */
+export type AuditSummaryPayload = {
   group: string;
   impacted_group: string;
-  /** Disparate-impact–style ratio in [0, 1], comparable to EEOC 80% rule framing */
   disparity: number;
-  /** Gap score in [0,1] used for impact estimates (people helped) */
   disparity_gap: number;
   law: string;
   total_rows: number;
-  /** Simple consumer-facing alias for banner copy */
   affected: number;
   affected_count: number;
   improved_count: number;
@@ -26,7 +18,6 @@ function capitalizeWord(s: string): string {
   return t.slice(0, 1).toUpperCase() + t.slice(1).toLowerCase();
 }
 
-/** Prefer `sex` for hiring demo continuity; fallback to lexicographically first attribute. */
 function pickAttribute(disparities: Record<string, unknown>): string | null {
   const keys = Object.keys(disparities || {});
   if (!keys.length) return null;
@@ -34,13 +25,9 @@ function pickAttribute(disparities: Record<string, unknown>): string | null {
   return keys.sort()[0];
 }
 
-/**
- * Computes impacted label, disparate impact ratio, disparity gap, and impact counts
- * from disparity API output. This is the canonical source for both banner and impact cards.
- */
-export function buildDemoSummary(
+export function buildAuditSummary(
   disparities: Record<string, unknown> | null | undefined,
-): DemoSummaryPayload | null {
+): AuditSummaryPayload | null {
   if (!disparities || typeof disparities !== 'object') return null;
 
   const attr = pickAttribute(disparities);

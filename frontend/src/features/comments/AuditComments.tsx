@@ -31,7 +31,7 @@ export default function AuditComments({ jobId }: { jobId: string }) {
   const [threadsError, setThreadsError] = useState(false);
 
   // Hardcode an author name for MVP
-  const currentUser = "Auditor (Demo)";
+  const currentUser = "Auditor";
 
   const fetchThreads = async () => {
     setThreadsError(false);

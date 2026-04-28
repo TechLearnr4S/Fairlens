@@ -2,7 +2,6 @@ import { Link, Outlet, useNavigate } from 'react-router-dom';
 import { Activity, ShieldCheck, UploadCloud, Users, FileLock, LogOut } from 'lucide-react';
 import { useAuth } from '../../features/auth/AuthContext';
 import { AuditStepper } from '../audit/AuditStepper';
-import { DemoController } from '../audit/DemoController';
 
 export function DashboardLayout() {
   const { user, logout } = useAuth();
@@ -70,7 +69,6 @@ export function DashboardLayout() {
           <Outlet />
         </div>
       </main>
-      <DemoController />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Gavel, Scale, Shield, Sparkles } from 'lucide-react';
 
 export type VerdictPayload = {
@@ -10,7 +11,7 @@ export type VerdictPayload = {
 export type VerdictCardProps =
   | { mode: 'loading' }
   | { mode: 'empty'; message?: string }
-  | VerdictPayload;
+  | (VerdictPayload & { children?: ReactNode });
 
 function severityStyles(sev: string): string {
   const u = sev.toUpperCase();
@@ -71,19 +72,19 @@ export function VerdictCard(props: VerdictCardProps) {
     );
   }
 
-  const { severity, legal_exposure, confidence, recommendation } = props as VerdictPayload;
+  const { severity, legal_exposure, confidence, recommendation, children } = props as VerdictPayload & { children?: ReactNode };
   const confidencePct = Math.round(Number(confidence) || 0);
   const confidenceBadge = confidenceBadgeStyles(confidencePct);
 
   return (
-    <div className="glass-panel rounded-2xl border border-indigo-500/25 bg-gradient-to-br from-indigo-950/40 to-slate-900/50 p-6 md:p-8 shadow-xl">
+    <div className="rounded-3xl border border-white/[0.08] bg-[#111827] p-6 md:p-8 shadow-2xl shadow-black/20">
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-indigo-500/15 border border-indigo-400/25">
-            <Scale className="text-indigo-300" size={22} />
+          <div className="p-2.5 rounded-xl bg-[#6366F1]/15 border border-[#6366F1]/25">
+            <Scale className="text-[#8B5CF6]" size={22} />
           </div>
           <div>
-            <h2 className="text-lg font-black text-white tracking-tight">Fairness verdict</h2>
+            <h2 className="text-2xl font-black text-white tracking-tight">Fairness verdict</h2>
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mt-0.5">
               Deterministic assessment
             </p>
@@ -97,18 +98,18 @@ export function VerdictCard(props: VerdictCardProps) {
       </div>
 
       <dl className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4">
+        <div className="rounded-2xl border border-white/[0.08] bg-[#0B1220] p-4">
           <dt className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">
             <Gavel size={14} className="text-slate-500" aria-hidden /> Legal exposure
           </dt>
           <dd className="text-white font-bold text-sm leading-snug">{legal_exposure}</dd>
         </div>
-        <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4">
+        <div className="rounded-2xl border border-white/[0.08] bg-[#0B1220] p-4">
           <dt className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">
             <Sparkles size={14} className="text-indigo-400" aria-hidden /> Confidence
           </dt>
           <dd className="flex items-center gap-2 flex-wrap">
-            <span className="text-indigo-200 font-black tabular-nums text-2xl">{confidencePct}%</span>
+            <span className="text-[#8B5CF6] font-black tabular-nums text-2xl">{confidencePct}%</span>
             <span
               className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${confidenceBadge.classes}`}
               title={
@@ -121,11 +122,12 @@ export function VerdictCard(props: VerdictCardProps) {
             </span>
           </dd>
         </div>
-        <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-4 md:col-span-2">
+        <div className="rounded-2xl border border-white/[0.08] bg-[#0B1220] p-4 md:col-span-2">
           <dt className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">Recommendation</dt>
           <dd className="text-slate-200 text-sm leading-relaxed">{recommendation}</dd>
         </div>
       </dl>
+      {children && <div className="mt-6 border-t border-white/[0.08] pt-5">{children}</div>}
     </div>
   );
 }

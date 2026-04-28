@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuditStore } from '../store/auditStore';
+import { useAuditProgressStore } from '../store/auditProgressStore';
 import { auth } from '../firebase';
 import { useToast } from '../components/providers/ToastProvider';
 import { apiFetch, isRequestTimeout } from '../utils/apiFetch';
@@ -200,6 +201,7 @@ export default function NewAudit() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { addToast } = useToast();
+  const { advanceTo, setAuditProgress } = useAuditProgressStore();
   const { 
     currentFile, setFile, 
     columns, setColumns, 
@@ -208,7 +210,7 @@ export default function NewAudit() {
     isUploading, setIsUploading, 
     targetColumn, setTargetColumn, 
     protectedAttributes, toggleProtectedAttribute, setProtectedAttributes,
-    jobId, setJobId, 
+    jobId, setJobId,
     setDisparities, setVerdict, setProxies, setExplanation, setAuditSummary,
     setProxyRisks, setProxySummary, setCorrelationMatrix, setCopilotSummary
   } = useAuditStore();
@@ -256,6 +258,11 @@ export default function NewAudit() {
   const reviewNarrative = useMemo(
     () => buildAuditReviewNarrative(useCase, protectedAttributes),
     [useCase, protectedAttributes],
+  );
+  const suggestedTargetColumn = rankedOutcomeColumns[0] ?? null;
+  const suggestedProtected = useMemo(
+    () => listDatasetRecommendedColumns(columns),
+    [columns],
   );
 
   useEffect(() => {
@@ -306,7 +313,10 @@ export default function NewAudit() {
         setColumns(data.columns);
         setColumnTypes(data.column_types ?? {});
         setPreview(data.preview ?? []);
-        if (data.job_id) setJobId(data.job_id);
+        if (data.job_id) {
+          setJobId(data.job_id);
+          setAuditProgress({ auditId: data.job_id, currentStep: 2, status: 'uploaded' });
+        }
         setFileUrl(data.file_url ?? null);
         setCurrentStep(1); // Proceed to step 1
       }
@@ -374,6 +384,7 @@ export default function NewAudit() {
       if (!configRes.ok) {
         throw new Error(await getApiErrorMessage(configRes, 'Failed to save audit configuration.'));
       }
+      advanceTo(2, jobId);
     } catch (error) {
       console.error("Config save failed:", error);
       throw error;
@@ -470,6 +481,7 @@ export default function NewAudit() {
          setVerdict(data.verdict ?? null);
          setAuditSummary(buildAuditSummary(data.disparities));
          setExplanation(data.explanation || null);
+         advanceTo(3, jobId);
          if (options?.demoMode) {
            await runDemoPostProcessing(jobId, activeTarget, activeProtectedAttributes);
          }
@@ -686,6 +698,69 @@ export default function NewAudit() {
             {isUploading ? "Parsing..." : "Select CSV File"}
           </button>
         </div>
+      )}
+
+      {currentStep > 0 && columns.length > 0 && (
+        <section className="rounded-3xl border border-white/[0.08] bg-[#111827] p-6 animate-in fade-in duration-300">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-[#8B5CF6]">Dataset loaded</p>
+              <h2 className="mt-2 text-2xl font-black text-white">{currentFile?.name ?? 'Uploaded CSV'}</h2>
+              <p className="mt-1 text-sm text-[#9CA3AF]">
+                {columns.length} columns detected · showing first {Math.min(preview.length, 5)} preview rows
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCurrentStep(2)}
+              className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-50"
+              disabled={!useCase}
+            >
+              Continue to Analysis
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-3">
+            <div className="rounded-2xl border border-white/[0.08] bg-[#0B1220] p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Suggested target</p>
+              <p className="mt-2 text-lg font-black text-white">{suggestedTargetColumn ?? 'No suggestion'}</p>
+              <p className="mt-1 text-xs text-[#9CA3AF]">Ranked by binary/low-entropy values and target-like names.</p>
+            </div>
+            <div className="rounded-2xl border border-white/[0.08] bg-[#0B1220] p-4 lg:col-span-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Protected attribute suggestions</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(suggestedProtected.length ? suggestedProtected : ['gender', 'race', 'age']).map((col) => (
+                  <span key={col} className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-1 text-xs font-bold text-indigo-200">
+                    {col}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {preview.length > 0 && (
+            <div className="mt-5 overflow-x-auto rounded-2xl border border-white/[0.08]">
+              <table className="min-w-full text-left text-xs">
+                <thead className="bg-[#0B1220] text-slate-500">
+                  <tr>
+                    {columns.slice(0, 8).map((col) => (
+                      <th key={col} className="px-4 py-3 font-black uppercase tracking-widest">{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.08]">
+                  {preview.slice(0, 5).map((row, idx) => (
+                    <tr key={idx} className="text-slate-300">
+                      {columns.slice(0, 8).map((col) => (
+                        <td key={col} className="max-w-[12rem] truncate px-4 py-3">{String(row[col] ?? '-')}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       )}
 
       {currentStep === 1 && (

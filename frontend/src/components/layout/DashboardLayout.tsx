@@ -1,5 +1,5 @@
 import { Link, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, ShieldCheck, UploadCloud, Users, FileLock, LogOut } from 'lucide-react';
+import { Activity, ShieldCheck, UploadCloud, Users, FileLock, LogOut, Zap, History } from 'lucide-react';
 import { useAuth } from '../../features/auth/AuthContext';
 import { AuditStepper } from '../audit/AuditStepper';
 
@@ -13,8 +13,8 @@ export function DashboardLayout() {
   };
 
   return (
-    <div className="min-h-screen flex bg-dark-900 text-slate-200">
-      <aside className="w-64 border-r border-slate-700/50 bg-dark-800/30 flex flex-col">
+    <div className="min-h-screen flex bg-[#0B1220] text-slate-200">
+      <aside className="w-64 border-r border-white/[0.08] bg-[#111827]/70 flex flex-col">
         <div className="p-6 pb-2 border-b border-transparent">
           <div className="flex items-center gap-3 mb-8">
             <div className="w-8 h-8 rounded bg-gradient-to-br from-primary-500 to-indigo-600 flex items-center justify-center">
@@ -33,6 +33,14 @@ export function DashboardLayout() {
             <UploadCloud size={18} />
             New Audit
           </Link>
+          <Link to="/sandbox" className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800/50 text-slate-400 hover:text-slate-200 transition-colors">
+            <Zap size={18} />
+            Sandbox
+          </Link>
+          <Link to="/history" className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800/50 text-slate-400 hover:text-slate-200 transition-colors">
+            <History size={18} />
+            Audit History
+          </Link>
           <Link to="/teams" className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800/50 text-slate-400 hover:text-slate-200 transition-colors">
             <Users size={18} />
             Teams
@@ -43,8 +51,8 @@ export function DashboardLayout() {
           </Link>
         </nav>
 
-        <div className="p-4 border-t border-slate-700/50">
-          <div className="flex items-center gap-3 px-3 py-3 mb-2 rounded-lg bg-dark-800 border border-slate-700/50">
+        <div className="p-4 border-t border-white/[0.08]">
+          <div className="flex items-center gap-3 px-3 py-3 mb-2 rounded-lg bg-[#0B1220] border border-white/[0.08]">
             <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold uppercase text-sm">
               {user?.name?.[0] || 'A'}
             </div>

@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
 import { useAuditStore } from '../../store/auditStore';
-import { 
-  Target, Activity, CheckCircle2, AlertCircle, Loader2, 
-  TrendingDown, Info, ShieldAlert, ShieldCheck,
-  Scale, Gauge, HelpCircle, Layers, Fingerprint,
-  Zap, MessageSquare, History, BarChart2, LineChart as LucideLineChart,
-  ShieldQuestion, ChevronRight
+import {
+  CheckCircle2, AlertCircle, Loader2,
+  Info, ShieldAlert, ShieldCheck,
+  Scale, Fingerprint, LineChart as LucideLineChart, ChevronRight
 } from 'lucide-react';
-import { 
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
-  Tooltip, Cell, Legend, CartesianGrid, LineChart, Line,
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
+  Tooltip, Cell, CartesianGrid, LineChart, Line,
   ScatterChart, Scatter, ZAxis
 } from 'recharts';
 
@@ -23,7 +21,7 @@ export const ModelEvaluator: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'metrics' | 'significance' | 'calibration' | 'policy'>('metrics');
   const [results, setResults] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
 
   const toggleAttr = (col: string) => {
     setSelectedAttrs(prev => 

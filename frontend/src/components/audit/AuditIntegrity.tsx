@@ -4,7 +4,6 @@ import {
   Lock, CheckCircle2, XCircle, Clock,
   Hash, Link2, KeyRound, Loader2,
   ChevronDown, ChevronUp, AlertTriangle,
-  Download, Printer, FileJson,
 } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 
@@ -147,35 +146,6 @@ export default function AuditIntegrity() {
   const [error, setError]           = useState<string | null>(null);
   const [verifiedAt, setVerifiedAt] = useState<string | null>(null);
   const [showSteps, setShowSteps]   = useState(false);
-  const [exporting, setExporting]   = useState(false);
-
-  const downloadJSON = async () => {
-    if (!jobId) return;
-    setExporting(true);
-    try {
-      const res = await fetch(`http://localhost:8000/audits/${jobId}/export/json`);
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const proof = await res.json();
-      const blob = new Blob([JSON.stringify(proof, null, 2)], { type: 'application/json' });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `Audit_Proof_${jobId}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Export failed');
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const downloadPDF = () => {
-    const prev = document.title;
-    document.title = `Audit Integrity Proof — ${jobId}`;
-    window.print();
-    document.title = prev;
-  };
 
   const runVerification = async () => {
     if (!jobId) return;

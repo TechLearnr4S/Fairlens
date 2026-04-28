@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldCheck, ShieldAlert, ShieldX,
   FileText, AlertTriangle, Cpu, Layers, Clock,
@@ -80,7 +80,7 @@ const score = (v?: number) => (v ?? 0).toFixed(4);
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function RiskBadge({ level }: { level: string }) {
-  const cfg: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
+  const cfg: Record<string, { bg: string; icon: React.ReactNode }> = {
     High:    { bg: 'bg-rose-500/15 border-rose-500/40 text-rose-400',     icon: <ShieldX size={13} /> },
     Medium:  { bg: 'bg-amber-500/15 border-amber-500/40 text-amber-400',  icon: <ShieldAlert size={13} /> },
     Low:     { bg: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400', icon: <ShieldCheck size={13} /> },

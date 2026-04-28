@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Info, HelpCircle } from 'lucide-react';
+import React from 'react';
+import { HelpCircle } from 'lucide-react';
 
 interface HeatmapProps {
   matrix: Record<string, Record<string, any>>;
@@ -112,3 +112,6 @@ export default function CorrelationHeatmap({ matrix }: HeatmapProps) {
     </div>
   );
 }
+
+
+

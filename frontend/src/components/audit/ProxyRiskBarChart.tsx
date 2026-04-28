@@ -85,7 +85,7 @@ export default function ProxyRiskBarChart({ data }: ProxyRiskBarChartProps) {
               <LabelList 
                 dataKey="score" 
                 position="right" 
-                formatter={(val: number) => val.toFixed(2)} 
+                formatter={(val: unknown) => typeof val === 'number' ? val.toFixed(2) : String(val)} 
                 style={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }} 
               />
             </Bar>

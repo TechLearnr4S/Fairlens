@@ -1,4 +1,3 @@
-import React from 'react';
 import { Sparkles, AlertCircle, HelpCircle, Activity, Lightbulb } from 'lucide-react';
 import { useAuditStore } from '../../store/auditStore';
 
@@ -136,3 +135,4 @@ export default function AiInsightCard() {
     </div>
   );
 }
+

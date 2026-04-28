@@ -37,12 +37,11 @@ export async function apiFetch(
   // Normalize the input to a string URL
   let url = typeof input === 'string' ? input : (input instanceof URL ? input.toString() : input.url);
 
-  // If we are in production (Vercel), replace localhost with our real backend
-  const apiBase = import.meta.env.VITE_API_BASE_URL;
-  if (apiBase && url.includes('localhost:8000')) {
-    // Ensure apiBase doesn't have a trailing slash for consistency
-    const cleanBase = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
-    url = url.replace(/https?:\/\/localhost:8000/i, cleanBase);
+  // NUCLEAR FALLBACK: Hardcoding your production URL to guarantee it works for the demo
+  const PRODUCTION_BACKEND = 'https://fairlens-production-7163.up.railway.app';
+  
+  if (url.includes('localhost:8000')) {
+    url = url.replace(/https?:\/\/localhost:8000/i, PRODUCTION_BACKEND);
   }
 
   try {

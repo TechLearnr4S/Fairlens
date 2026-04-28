@@ -1,10 +1,33 @@
 # ✨ FairLens Studio
 
-**FairLens Studio** is a responsible AI governance platform that helps organizations **measure, flag, and fix** hidden bias in machine learning datasets and model predictions — before their systems impact real people.
+**FairLens Studio** is a responsible AI governance platform that helps organizations **measure, flag, explain, and mitigate** hidden bias in machine learning datasets and model predictions before those systems affect real people.
 
 Built for the **Google Solution Challenge 2026** (Open Innovation track).
 
-> Computer programs now make life-changing decisions about jobs, bank loans, and medical care. If these programs learn from flawed or unfair historical data, they repeat and amplify those discriminatory mistakes. FairLens exists to stop that.
+> Computer programs now make life-changing decisions about jobs, bank loans, and medical care. If those systems learn from flawed or unfair historical data, they repeat and amplify discrimination at scale. FairLens exists to surface that risk early, translate it into governance language, and show a practical mitigation path before deployment.
+
+## Why It Matters
+
+FairLens is built around a simple before/after story:
+
+- **Before**: teams see a model score or approval rate, but not who is being disadvantaged or which features act as hidden proxies.
+- **After**: they get a guided audit, subgroup disparity evidence, proxy-risk findings, regulatory framing, mitigation analysis, and a downloadable fairness passport.
+
+This aligns directly with:
+
+- **SDG 10 - Reduced Inequalities** by making demographic harms visible and measurable.
+- **SDG 8 - Decent Work and Economic Growth** by supporting fairer hiring and lending decisions.
+- **SDG 16 - Peace, Justice and Strong Institutions** through auditable, tamper-evident governance artifacts.
+
+## Live Demo Flow
+
+The fastest judge path is now a one-click live demo:
+
+1. Open the dashboard.
+2. Click `Try Live Demo`.
+3. FairLens loads a bundled sample dataset, auto-configures the audit, runs the fairness scan, computes proxy risks, and opens the results view.
+
+That demo path is designed to showcase the full story in one run: disparities, proxy bias, governance framing, impact metrics, and AI copilot output.
 
 ---
 

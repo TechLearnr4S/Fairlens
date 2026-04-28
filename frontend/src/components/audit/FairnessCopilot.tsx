@@ -12,6 +12,7 @@ import {
 import { useAuditStore } from '../../store/auditStore';
 import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
 import { AuditEmptyState } from '../ui/AuditEmptyState';
+import { useToast } from '../providers/ToastProvider';
 
 const AGENTS = [
   { id: 'auditor', name: 'Auditor Agent', icon: ShieldCheck, color: 'text-rose-400', bg: 'bg-rose-500/10' },
@@ -21,6 +22,7 @@ const AGENTS = [
 ];
 
 export default function FairnessCopilot() {
+  const { addToast } = useToast();
   const { 
     jobId, 
     copilotSummary, 
@@ -31,10 +33,12 @@ export default function FairnessCopilot() {
   
   const [activeStep, setActiveStep] = useState<number>(-1);
   const [apiError, setApiError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const runCopilot = async () => {
     if (!jobId) return;
     setApiError(false);
+    setErrorMessage(null);
     setIsCopilotRunning(true);
     setCopilotSummary(null);
     setActiveStep(0);
@@ -56,14 +60,20 @@ export default function FairnessCopilot() {
       
       if (!res.ok) {
         console.error("Copilot backend error:", data);
-        alert(`Copilot Error: ${data.detail || data.error || 'Failed to analyze'}`);
+        setApiError(true);
+        setErrorMessage(data.detail || data.error || 'Failed to analyze');
         return;
       }
       
       setCopilotSummary(data);
     } catch (err) {
       console.error("Copilot failed:", err);
-      if (!isRequestTimeout(err)) setApiError(true);
+      if (!isRequestTimeout(err)) {
+        setApiError(true);
+        setErrorMessage(err instanceof Error ? err.message : 'Multi-agent analysis failed.');
+      } else {
+        addToast('Copilot timed out. You can retry once the backend is ready.', 'error');
+      }
     } finally {
       setIsCopilotRunning(false);
       setActiveStep(3);
@@ -87,7 +97,7 @@ export default function FairnessCopilot() {
       <AuditEmptyState
         variant="failed-api"
         title="Copilot could not run"
-        description="The multi-agent analysis did not complete. Check the API and try again."
+        description={errorMessage ?? "The multi-agent analysis did not complete. Check the API and try again."}
         onRetry={runCopilot}
         retryLabel="Run Copilot again"
         className="glass-panel border-indigo-500/20 mb-8"

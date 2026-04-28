@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAuditStore } from '../../store/auditStore';
 import {
   CheckCircle2, AlertCircle, Loader2,
@@ -78,6 +78,21 @@ export const ModelEvaluator: React.FC = () => {
     size: data.metrics.size
   })) : [];
 
+  const likelyPredictionColumns = useMemo(() => {
+    const preferred = columns.filter((column) => {
+      const lower = column.toLowerCase();
+      return (
+        lower.includes('pred') ||
+        lower.includes('prob') ||
+        lower.includes('score') ||
+        lower.includes('target') ||
+        lower.includes('label')
+      );
+    });
+
+    return preferred.length > 0 ? preferred : columns.slice(0, 5);
+  }, [columns]);
+
   if (!jobId) {
     return (
       <AuditEmptyState
@@ -105,6 +120,34 @@ export const ModelEvaluator: React.FC = () => {
           compact
           className="border-rose-500/25"
         />
+      )}
+
+      {!results && (
+        <div className="rounded-2xl border border-slate-700/50 bg-slate-900/40 p-5">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+            Setup guidance
+          </p>
+          <p className="mt-2 text-sm text-slate-300 leading-relaxed">
+            Pick the ground-truth outcome, the model prediction column, and at least one protected attribute. If your dataset does not contain a prediction column yet, run the base fairness audit instead and come back once you have model outputs.
+          </p>
+          {likelyPredictionColumns.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {likelyPredictionColumns.map((column) => (
+                <button
+                  key={column}
+                  type="button"
+                  onClick={() => {
+                    if (!yTrue) setYTrue(column);
+                    else if (!yPred) setYPred(column);
+                  }}
+                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:border-primary-500 hover:text-white"
+                >
+                  Suggest `{column}`
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {/* Policy-First Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">

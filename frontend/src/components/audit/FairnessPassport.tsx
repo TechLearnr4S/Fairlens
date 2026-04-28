@@ -283,19 +283,25 @@ export default function FairnessPassport() {
   const reg = passport?.regulatory_compliance;
   const km = fm?.key_metrics ?? {};
 
-  const diValue = Number(km.disparate_impact_ratio ?? 0);
-  const diThreshold = Number(reg?.violations?.[0]?.threshold ?? 0.8);
-  const diViolation = (Array.isArray(reg?.violations) && reg!.violations!.length > 0)
-    || (diValue > 0 && diValue < diThreshold);
-  const regLaw = reg?.framework?.name || 'EEOC 80% Rule';
-  const regExplanation = reg?.violations?.[0]?.detail
-    || (diViolation
-      ? `Selection rate below ${diThreshold.toFixed(2)} threshold.`
-      : `Selection rate meets ${diThreshold.toFixed(2)} threshold.`);
+  const firstViolation = reg?.violations?.[0];
+  const regLaw = reg?.framework?.name || 'Applicable fairness framework';
+  const regStatus = reg?.status ?? 'REVIEW_REQUIRED';
+  const regMetricLabel = firstViolation?.metric ?? 'Disparate Impact';
+  const regMetricValue = typeof firstViolation?.value === 'number'
+    ? firstViolation.value
+    : Number(km.disparate_impact_ratio ?? 0);
+  const regThreshold = typeof firstViolation?.threshold === 'number'
+    ? firstViolation.threshold
+    : 0.8;
+  const hasViolation = Array.isArray(reg?.violations) && reg.violations.length > 0;
+  const regExplanation = firstViolation?.detail
+    ?? (regStatus === 'COMPLIANT'
+      ? 'Current audit signals remain within the selected governance threshold.'
+      : 'This audit should be reviewed against the applicable policy threshold before deployment.');
   const regRemediation = reg?.remediation_steps?.[0]
-    || (diViolation
-      ? 'Adjust model or justify business necessity.'
-      : 'Continue monitoring and keep compliance records.');
+    ?? (regStatus === 'COMPLIANT'
+      ? 'Continue monitoring and keep compliance records.'
+      : 'Review the highest-risk disparity and document mitigation before deployment.');
 
   const riskScoreBar = Math.min((risk?.risk_score ?? 0) * 100, 100);
   const riskBarColor =
@@ -506,37 +512,55 @@ export default function FairnessPassport() {
         <Section icon={<AlertTriangle size={16} />} title="Regulatory Snapshot">
           <div
             className={`rounded-2xl border p-5 space-y-4 ${
-              diViolation
+              hasViolation || regStatus === 'VIOLATION_DETECTED'
                 ? 'bg-rose-500/10 border-rose-500/35'
-                : 'bg-emerald-500/10 border-emerald-500/30'
+                : regStatus === 'COMPLIANT'
+                ? 'bg-emerald-500/10 border-emerald-500/30'
+                : 'bg-amber-500/10 border-amber-500/30'
             }`}
           >
             <div className="space-y-2">
               <p className="text-sm font-bold text-slate-200">
                 Law: <span className="text-white">{regLaw}</span>
               </p>
+              {reg?.framework?.body && (
+                <p className="text-sm font-bold text-slate-200">
+                  Oversight Body: <span className="text-white">{reg.framework.body}</span>
+                </p>
+              )}
+              {reg?.framework?.reference && (
+                <p className="text-sm font-bold text-slate-200">
+                  Reference: <span className="text-white">{reg.framework.reference}</span>
+                </p>
+              )}
               <p className="text-sm font-bold text-slate-200">
-                Metric: <span className="text-white">Disparate Impact = {diValue.toFixed(2)}</span>
+                Metric: <span className="text-white">{regMetricLabel} = {regMetricValue.toFixed(2)}</span>
               </p>
               <p className="text-sm font-bold text-slate-200">
-                Threshold: <span className="text-white">{diThreshold.toFixed(2)}</span>
+                Threshold: <span className="text-white">{regThreshold.toFixed(2)}</span>
               </p>
             </div>
 
             <div
               className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-black uppercase tracking-wider ${
-                diViolation
+                hasViolation || regStatus === 'VIOLATION_DETECTED'
                   ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                  : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : regStatus === 'COMPLIANT'
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
               }`}
             >
-              {diViolation ? (
+              {hasViolation || regStatus === 'VIOLATION_DETECTED' ? (
                 <>
-                  <ShieldX size={14} /> ❌ Violation Detected
+                  <ShieldX size={14} /> Violation Detected
+                </>
+              ) : regStatus === 'COMPLIANT' ? (
+                <>
+                  <ShieldCheck size={14} /> Compliant
                 </>
               ) : (
                 <>
-                  <ShieldCheck size={14} /> ✅ No Immediate Violation
+                  <ShieldAlert size={14} /> Review Required
                 </>
               )}
             </div>
@@ -551,6 +575,25 @@ export default function FairnessPassport() {
                 {regRemediation}
               </p>
             </div>
+
+            {Array.isArray(reg?.violations) && reg.violations.length > 0 && (
+              <div className="space-y-2 border-t border-slate-700/40 pt-4">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                  Findings
+                </p>
+                {reg.violations.map((violation, index) => (
+                  <div key={`${violation.attribute ?? 'violation'}-${index}`} className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-100">
+                    <p className="font-semibold text-white">
+                      {violation.attribute ?? 'Audit finding'} · {violation.metric ?? 'Metric'}
+                    </p>
+                    <p className="mt-1 text-rose-100/90">
+                      Value {typeof violation.value === 'number' ? violation.value.toFixed(2) : 'N/A'} vs threshold {typeof violation.threshold === 'number' ? violation.threshold.toFixed(2) : 'N/A'}
+                    </p>
+                    {violation.detail && <p className="mt-1 text-rose-100/90">{violation.detail}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </Section>
 

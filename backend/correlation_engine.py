@@ -85,10 +85,19 @@ def run_correlation_analysis(
     if target_col:
         exclude.add(target_col)
 
-    feature_cols = [c for c in df.columns if c not in exclude]
+    feature_cols = []
+    for c in df.columns:
+        if c in exclude:
+            continue
+        # SAFETY CHECK: Skip high-cardinality columns (IDs, Names, etc.)
+        # This prevents 14GB+ memory allocation crashes during processing
+        if df[c].nunique() > 100:
+            logger.warning(f"Dropping high-cardinality column '{c}' from feature space ({df[c].nunique()} unique).")
+            continue
+        feature_cols.append(c)
 
     if not feature_cols:
-        raise ValueError("No feature columns remain after excluding protected/target columns.")
+        raise ValueError("No feature columns remain after excluding protected/target and high-cardinality columns.")
 
     # --- 2. Detect feature types for the remaining columns -----------------
     type_map = detect_feature_types(df, exclude_cols=list(exclude))
@@ -237,7 +246,13 @@ def compute_numeric_feature_correlation_matrix(
         ``{"columns": [str, ...], "matrix": [[float | null, ...], ...], "method": "pearson"}``
     """
     exclude = set(excluded or ())
-    feats = [c for c in df.columns if c not in exclude]
+    feats = []
+    for c in df.columns:
+        if c in exclude:
+            continue
+        if df[c].nunique() > 100:
+            continue
+        feats.append(c)
 
     if not feats:
         return {"columns": [], "matrix": [], "method": "pearson"}
@@ -321,6 +336,12 @@ def detect_feature_types(
 
     for col in df.columns:
         if col in exclude:
+            continue
+
+        # SAFETY CHECK: Skip high-cardinality columns (IDs, Names, etc.)
+        # These cause memory crashes during correlation matrix generation
+        if df[col].nunique() > 100:
+            logger.warning(f"Skipping column {col} in proxy detection: High cardinality ({df[col].nunique()} unique values)")
             continue
 
         col_dtype = df[col].dtype

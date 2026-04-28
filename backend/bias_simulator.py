@@ -127,11 +127,25 @@ def generate_insight(before, after, method, threshold=0.5, feature=None):
         
     return ". ".join(insights) + "."
 
+def drop_high_cardinality_cols(df: pd.DataFrame, target_col: str, protected_attrs: list) -> pd.DataFrame:
+    """Drops columns with >100 unique values (IDs, names) to prevent memory explosion in OneHotEncoder."""
+    df_clean = df.copy()
+    for col in df_clean.columns:
+        if col == target_col or col in protected_attrs:
+            continue
+        if df_clean[col].nunique() > 100:
+            logger.warning(f"SIMULATION | Dropping high-cardinality column '{col}' ({df_clean[col].nunique()} unique)")
+            df_clean = df_clean.drop(columns=[col])
+    return df_clean
+
 def simulate_mitigation_enhanced(job_id: str, df: pd.DataFrame, target_col: str, protected_attrs: list, method: str, params: dict) -> dict:
     """
     Enhanced simulation engine with multi-layer caching, rule-based insights, and optimized metrics.
     """
     try:
+        # 0. Safety Clean: Drop high-cardinality columns that crash OneHotEncoder
+        df = drop_high_cardinality_cols(df, target_col, protected_attrs)
+
         # 1. Check Simulation Cache (Fastest)
         params_frozen = tuple(sorted(params.items())) if params else ()
         cache_key = (job_id, method, params_frozen)

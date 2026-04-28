@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Download, Filter, History as HistoryIcon, Play, RotateCcw } from 'lucide-react';
+import { Calendar, Download, Filter, History as HistoryIcon, Play, RotateCcw, FileCheck } from 'lucide-react';
 import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
+import { useAuditStore } from '../../store/auditStore';
+import { useToast } from '../../components/providers/ToastProvider';
 
 type AuditHistoryItem = {
   job_id: string;
@@ -21,11 +23,15 @@ function riskClass(level: string) {
 
 export default function History() {
   const navigate = useNavigate();
+  const { addToast } = useToast();
+  const activeJobId = useAuditStore((s) => s.jobId);
+
   const [audits, setAudits] = useState<AuditHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [riskFilter, setRiskFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -54,18 +60,42 @@ export default function History() {
     });
   }, [audits, dateFilter, riskFilter]);
 
-  const downloadPassport = async (jobId: string) => {
-    const res = await apiFetch(`http://localhost:8000/audits/${jobId}/passport`);
-    if (!res.ok) return;
-    const json = await res.json();
-    const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `FairLens_Passport_${jobId}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const downloadPassport = useCallback(async (jobId: string) => {
+    setDownloadingId(jobId);
+    try {
+      const res = await apiFetch(`http://localhost:8000/audits/${jobId}/passport`);
+      if (!res.ok) {
+        addToast('Could not fetch passport for this audit.', 'error');
+        return;
+      }
+      const json = await res.json();
+      const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `FairLens_Passport_${jobId.slice(0, 8)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addToast('Passport downloaded successfully.', 'success');
+    } catch {
+      addToast('Download failed. Please try again.', 'error');
+    } finally {
+      setDownloadingId(null);
+    }
+  }, [addToast]);
+
+  /** Navigate to results for this audit.
+   * If the audit matches the currently active in-memory session → go to dashboard.
+   * Otherwise, download the passport (the only persisted artifact) and explain why. */
+  const handleViewResults = useCallback(async (audit: AuditHistoryItem) => {
+    if (audit.job_id === activeJobId) {
+      navigate('/');
+      return;
+    }
+    // Session is not active — download passport as the best available artifact
+    addToast('This session is no longer live. Downloading the Fairness Passport instead.', 'info');
+    await downloadPassport(audit.job_id);
+  }, [activeJobId, navigate, addToast, downloadPassport]);
 
   return (
     <div className="space-y-8 pb-20 animate-in fade-in duration-500">
@@ -115,23 +145,68 @@ export default function History() {
         ) : error ? (
           <div className="rounded-2xl border border-[#EF4444]/30 bg-[#EF4444]/10 p-5 text-sm text-rose-100">{error}</div>
         ) : filtered.length === 0 ? (
-          <div className="rounded-2xl border border-slate-800 bg-[#0B1220] p-8 text-center text-[#9CA3AF]">No audits match the selected filters.</div>
+          <div className="rounded-2xl border border-slate-800 bg-[#0B1220] p-8 text-center space-y-3">
+            <HistoryIcon className="mx-auto text-slate-600" size={32} />
+            <p className="text-[#9CA3AF]">No audits match the selected filters.</p>
+            <button
+              onClick={() => navigate('/new-audit')}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500"
+            >
+              <Play size={14} /> Start New Audit
+            </button>
+          </div>
         ) : (
           <div className="space-y-3">
             {filtered.map((audit) => {
               const risk = audit.risk_level ?? (audit.has_results ? 'Medium' : 'Unknown');
+              const isActive = audit.job_id === activeJobId;
+              const isDownloading = downloadingId === audit.job_id;
               return (
-                <div key={audit.job_id} className="grid gap-4 rounded-2xl border border-white/[0.08] bg-[#0B1220] p-4 transition hover:border-indigo-500/40 lg:grid-cols-[1.5fr_1fr_0.7fr_1.1fr] lg:items-center">
+                <div
+                  key={audit.job_id}
+                  className={`grid gap-4 rounded-2xl border bg-[#0B1220] p-4 transition hover:border-indigo-500/40 lg:grid-cols-[1.5fr_1fr_0.7fr_1.1fr] lg:items-center ${
+                    isActive ? 'border-indigo-500/50 ring-1 ring-indigo-500/20' : 'border-white/[0.08]'
+                  }`}
+                >
                   <div>
-                    <p className="font-bold text-white">{audit.filename || 'Untitled audit'}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-white">{audit.filename || 'Untitled audit'}</p>
+                      {isActive && (
+                        <span className="rounded-full bg-indigo-500/20 border border-indigo-500/30 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-indigo-300">
+                          Active
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs font-mono text-slate-500">{audit.job_id.slice(0, 8)}...</p>
                   </div>
-                  <p className="text-sm text-[#9CA3AF]">{audit.analysis_time || audit.upload_time ? new Date(audit.analysis_time || audit.upload_time || '').toLocaleString() : 'No date'}</p>
-                  <span className={`w-fit rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${riskClass(risk)}`}>{risk}</span>
+                  <p className="text-sm text-[#9CA3AF]">
+                    {audit.analysis_time || audit.upload_time
+                      ? new Date(audit.analysis_time || audit.upload_time || '').toLocaleString()
+                      : 'No date'}
+                  </p>
+                  <span className={`w-fit rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${riskClass(risk)}`}>
+                    {risk}
+                  </span>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <button onClick={() => navigate('/')} className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500">View Results</button>
-                    <button onClick={() => void downloadPassport(audit.job_id)} className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700"><Download size={13} /> Passport</button>
-                    <button onClick={() => navigate('/new-audit')} className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700"><RotateCcw size={13} /> Re-run</button>
+                    <button
+                      onClick={() => void handleViewResults(audit)}
+                      className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500"
+                    >
+                      <FileCheck size={13} /> {isActive ? 'View Results' : 'View Passport'}
+                    </button>
+                    <button
+                      onClick={() => void downloadPassport(audit.job_id)}
+                      disabled={isDownloading}
+                      className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      <Download size={13} /> {isDownloading ? 'Saving…' : 'Download'}
+                    </button>
+                    <button
+                      onClick={() => navigate('/new-audit')}
+                      className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700"
+                    >
+                      <RotateCcw size={13} /> Re-run
+                    </button>
                   </div>
                 </div>
               );

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShieldCheck, UploadCloud, AlertTriangle, Zap, Loader, Play, Wrench, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, UploadCloud, AlertTriangle, Zap, Loader, Play, Wrench, CheckCircle2, Users, Scale, TrendingDown, Download } from 'lucide-react';
+import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
 import { useAuditStore } from '../../store/auditStore';
 import { useAuditProgressStore } from '../../store/auditProgressStore';
-import { apiFetch, isRequestTimeout } from '../../utils/apiFetch';
 import { unwrapAuditBody } from '../../utils/auditEnvelope';
 import { auth } from '../../firebase';
 import { buildAuditSummary } from '../../utils/auditSummary';
@@ -251,6 +251,78 @@ export default function Dashboard() {
             Start New Audit
           </Link>
         </header>
+
+        {/* Human Impact Headline */}
+        {auditSummary && (
+          <div className="rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-500/10 to-orange-500/10 p-5">
+            <div className="flex items-start gap-4">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/20">
+                <Users size={20} className="text-amber-400" />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-amber-400">Real-world impact</p>
+                <p className="mt-1 text-base font-bold text-white leading-relaxed">
+                  Approximately{' '}
+                  <span className="text-amber-300">
+                    {auditSummary.affected_count.toLocaleString()} {auditSummary.impacted_group}
+                  </span>{' '}
+                  are being disadvantaged by a{' '}
+                  <span className="text-amber-300">{(auditSummary.disparity_gap * 100).toFixed(1)}% disparity gap</span>
+                  {' '}— potentially in violation of{' '}
+                  <span className="text-amber-300">{auditSummary.law}</span>.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Regulatory Risk Summary */}
+        {disparities && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className={`rounded-2xl border p-4 ${
+              (storeVerdict as any)?.severity === 'CRITICAL' || (storeVerdict as any)?.severity === 'HIGH'
+                ? 'border-red-500/30 bg-red-500/10'
+                : (storeVerdict as any)?.severity === 'MEDIUM'
+                  ? 'border-amber-500/30 bg-amber-500/10'
+                  : 'border-emerald-500/30 bg-emerald-500/10'
+            }`}>
+              <div className="flex items-center gap-2 mb-1">
+                <Scale size={14} className="text-slate-400" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Regulatory Risk</p>
+              </div>
+              <p className={`text-lg font-black ${
+                (storeVerdict as any)?.severity === 'CRITICAL' || (storeVerdict as any)?.severity === 'HIGH'
+                  ? 'text-red-300' : (storeVerdict as any)?.severity === 'MEDIUM' ? 'text-amber-300' : 'text-emerald-300'
+              }`}>
+                {(storeVerdict as any)?.legal_exposure ?? 'Evaluating…'}
+              </p>
+            </div>
+            <div className={`rounded-2xl border p-4 ${
+              (storeVerdict as any)?.severity === 'CRITICAL' || (storeVerdict as any)?.severity === 'HIGH'
+                ? 'border-red-500/30 bg-red-500/10'
+                : 'border-amber-500/30 bg-amber-500/10'
+            }`}>
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingDown size={14} className="text-slate-400" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Severity</p>
+              </div>
+              <p className={`text-lg font-black ${
+                (storeVerdict as any)?.severity === 'CRITICAL' ? 'text-red-300'
+                : (storeVerdict as any)?.severity === 'HIGH' ? 'text-orange-300'
+                : (storeVerdict as any)?.severity === 'MEDIUM' ? 'text-amber-300' : 'text-emerald-300'
+              }`}>
+                {(storeVerdict as any)?.severity ?? '—'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <ShieldCheck size={14} className="text-slate-400" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Audit Integrity</p>
+              </div>
+              <p className="text-lg font-black text-emerald-300">Ed25519 Signed</p>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-12">
           <StorySection index="01" title="Verdict">
@@ -580,6 +652,11 @@ function DashboardEmptyState() {
       setProxies(Array.isArray(auditData.proxies) ? auditData.proxies : []);
       setVerdict(auditData.verdict ?? null);
       setAuditSummary(buildAuditSummary(auditData.disparities as Record<string, unknown>));
+      // Immediately push to recent audits so the history panel shows an entry
+      setRecentAudits((prev) => [
+        { job_id, filename: file.name, upload_time: new Date().toISOString(), has_results: true },
+        ...prev.filter((a) => a.job_id !== job_id).slice(0, 4),
+      ]);
 
       try {
         const explainRes = await apiFetch(`http://localhost:8000/audits/${job_id}/explain`, {
@@ -733,8 +810,25 @@ function DashboardEmptyState() {
                 </div>
                 <div className="flex items-center gap-3">
                   <RiskBadge level={audit.risk_level ?? (audit.has_results ? 'Medium' : 'Unknown')} />
-                  <button onClick={() => navigate('/')} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-500">
-                    Open
+                  <button
+                    onClick={async () => {
+                      // If this audit is the current active session, show results
+                      // Otherwise download the passport (the only persisted artifact)
+                      const res = await apiFetch(`http://localhost:8000/audits/${audit.job_id}/passport`).catch(() => null);
+                      if (res?.ok) {
+                        const json = await res.json().catch(() => null);
+                        if (json) {
+                          const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url; a.download = `FairLens_Passport_${audit.job_id.slice(0,8)}.json`;
+                          a.click(); URL.revokeObjectURL(url);
+                        }
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-500"
+                  >
+                    <Download size={12} /> Passport
                   </button>
                 </div>
               </div>

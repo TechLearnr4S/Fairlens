@@ -298,7 +298,6 @@ export default function NewAudit() {
         method: 'POST',
         body: formData,
       });
-      console.log('Upload response', res);
       if (!res.ok) {
         throw new Error(await getApiErrorMessage(res, 'Failed to upload CSV.'));
       }
@@ -380,7 +379,6 @@ export default function NewAudit() {
           use_case: activeUseCase || 'Other'
         })
       });
-      console.log('Config response', configRes);
       if (!configRes.ok) {
         throw new Error(await getApiErrorMessage(configRes, 'Failed to save audit configuration.'));
       }
@@ -465,7 +463,6 @@ export default function NewAudit() {
           ground_truth_column: groundTruthColumn
         })
       });
-      console.log('Audit run response', res);
       if (!res.ok) {
         throw new Error(await getApiErrorMessage(res, 'Audit run failed.'));
       }

@@ -72,6 +72,14 @@ def generate_proxy_explanation(proxy_results: list[dict]) -> str:
         )
         return response.text.strip() if response and response.text else "Gemini failed to generate a response."
     except Exception as e:
+        err_str = str(e).lower()
+        if "resource_exhausted" in err_str or "429" in err_str or "quota" in err_str:
+            logger.warning("Gemini rate limit hit in generate_proxy_explanation.")
+            return (
+                "⚡ AI analysis paused — free-tier quota reached. "
+                "The deterministic proxy risk scores above are still fully accurate. "
+                "Retry in a few minutes for the AI narrative."
+            )
         logger.error("Gemini Error in generate_proxy_explanation: %s", e)
         return (
             "The analysis detected potential proxy variables that may indirectly encode "
@@ -93,7 +101,7 @@ def generate_completion(prompt: str, persona: str = "Expert AI Auditor", use_str
                 max_output_tokens=800,
                 temperature=0.2,
                 response_mime_type="application/json",
-                response_schema=AUDIT_SCHEMA,  # Enforces typed JSON — no parse errors
+                response_schema=AUDIT_SCHEMA,
             )
         else:
             config = types.GenerateContentConfig(
@@ -108,6 +116,11 @@ def generate_completion(prompt: str, persona: str = "Expert AI Auditor", use_str
         )
         return response.text.strip() if response and response.text else ("{}" if use_structured else "No response generated.")
     except Exception as e:
+        err_str = str(e).lower()
+        if "resource_exhausted" in err_str or "429" in err_str or "quota" in err_str:
+            logger.warning("Gemini rate limit hit in generate_completion (persona=%s).", persona)
+            return ("{\"rate_limited\": true}" if use_structured
+                    else "⚡ AI analysis paused — free-tier quota reached. Deterministic fairness results are still accurate.")
         logger.error("Gemini Completion Error: %s", e)
         return "{}" if use_structured else "Internal agent error during narrative generation."
 
@@ -127,11 +140,15 @@ async def generate_ai_insight(findings: list[dict], proxies: list[dict], mitigat
             "recommended_action": "Review feature correlations and apply threshold adjustments."
         }
 
+    # Truncate inputs to avoid Quota TPM limits (Top 15 is plenty for a summary)
+    top_findings = findings[:15] if isinstance(findings, list) else findings
+    top_proxies = proxies[:15] if isinstance(proxies, list) else proxies
+
     prompt = (
         "You are an AI fairness expert for FairLens Studio.\n\n"
-        "Input Data:\n"
-        f"- Findings: {json.dumps(findings, indent=2)}\n"
-        f"- Proxy Risks: {json.dumps(proxies, indent=2)}\n"
+        "Input Data (Top Findings):\n"
+        f"- Findings: {json.dumps(top_findings, indent=2)}\n"
+        f"- Proxy Risks: {json.dumps(top_proxies, indent=2)}\n"
         f"- Mitigation Strategy: {json.dumps(mitigation, indent=2)}\n\n"
         "Tasks:\n"
         "1. Explain the fairness issues in simple, jargon-free language.\n"
@@ -163,7 +180,7 @@ async def generate_ai_insight(findings: list[dict], proxies: list[dict], mitigat
             model=_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
-                max_output_tokens=800,
+                max_output_tokens=1024,
                 temperature=0.2,
                 response_mime_type="application/json",
                 response_schema=schema,
@@ -188,6 +205,17 @@ async def generate_ai_insight(findings: list[dict], proxies: list[dict], mitigat
             "recommended_action": data.get("recommended_action", "Review feature correlations."),
         }
     except Exception as e:
+        err_str = str(e).lower()
+        if "resource_exhausted" in err_str or "429" in err_str or "quota" in err_str:
+            logger.warning("Gemini rate limit hit in generate_ai_insight.")
+            return {
+                "explanation": "⚡ AI analysis paused — free-tier quota reached. The deterministic bias metrics above are still fully accurate. Retry in a few minutes for the AI narrative.",
+                "governance_summary": "Status: Quota Limited. All deterministic fairness metrics, regulatory compliance checks, and proxy risk scores remain valid and accurate.",
+                "regulatory_risk": "Deterministic regulatory compliance mapping is available. See the Fairness Passport for full statutory analysis.",
+                "severity": "MEDIUM",
+                "recommended_action": "Review the deterministic disparity scores and proxy risk analysis. Apply threshold adjustment or reweighing mitigation.",
+                "rate_limited": True,
+            }
         logger.error("Generate AI insight failed: %s", e)
         return {
             "explanation": "The analysis detected disparities in selection rates across protected subgroups.",

@@ -34,8 +34,19 @@ export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  // Normalize the input to a string URL
+  let url = typeof input === 'string' ? input : (input instanceof URL ? input.toString() : input.url);
+
+  // If we are in production (Vercel), replace localhost with our real backend
+  const apiBase = import.meta.env.VITE_API_BASE_URL;
+  if (apiBase && url.includes('localhost:8000')) {
+    // Ensure apiBase doesn't have a trailing slash for consistency
+    const cleanBase = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
+    url = url.replace(/https?:\/\/localhost:8000/i, cleanBase);
+  }
+
   try {
-    return await fetchWithTimeout(input, init);
+    return await fetchWithTimeout(url, init);
   } catch (err) {
     if (isRequestTimeout(err)) {
       toastSink?.(TIMEOUT_MESSAGE, 'error');

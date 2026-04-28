@@ -25,6 +25,7 @@ export default function NewAudit() {
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
   const [toasts, setToasts] = useState<{id: string, message: string, type: ToastType}[]>([]);
+  const [useCase, setUseCase] = useState<string>('Other');
 
   const addToast = (message: string, type: ToastType = 'info') => {
     const id = Math.random().toString(36).substring(7);
@@ -41,6 +42,36 @@ export default function NewAudit() {
       await uploadToBackend(file);
     } else {
       addToast("Please upload a valid CSV file", 'error');
+    }
+  };
+
+  const handleUseCaseChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setUseCase(val);
+    
+    if (protectedAttributes.length === 0 && columns.length > 0) {
+      let suggestions: string[] = [];
+      
+      const matchCols = (keywords: string[]) => {
+        return columns.filter(c => keywords.some(k => c.toLowerCase().includes(k)));
+      };
+
+      if (val === 'Hiring') {
+        suggestions = matchCols(['race', 'gender', 'sex', 'age', 'disability', 'ethnicity']);
+      } else if (val === 'Credit Scoring') {
+        suggestions = matchCols(['race', 'gender', 'sex', 'age', 'marital', 'zip', 'neighborhood']);
+      } else if (val === 'Healthcare') {
+        suggestions = matchCols(['race', 'gender', 'sex', 'age', 'insurance', 'income']);
+      }
+      
+      suggestions.forEach(attr => {
+         if (!protectedAttributes.includes(attr)) {
+            toggleProtectedAttribute(attr);
+         }
+      });
+      if (suggestions.length > 0) {
+        addToast(`Auto-suggested ${suggestions.length} protected attributes for ${val}.`, 'info');
+      }
     }
   };
 
@@ -100,7 +131,8 @@ export default function NewAudit() {
           target: targetColumn,
           protected_attributes: protectedAttributes,
           filename: currentFile?.name,
-          file_url: fileUrl
+          file_url: fileUrl,
+          use_case: useCase
         })
       });
     } catch (error) {
@@ -246,6 +278,35 @@ export default function NewAudit() {
           {/* Configuration Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="space-y-6">
+              {/* Use Case Selection */}
+              <div className="glass-panel p-6 border-slate-700/50">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center text-orange-400">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">System Use Case</h3>
+                    <p className="text-xs text-slate-400">Contextualizes the fairness metrics and recommendations.</p>
+                  </div>
+                </div>
+                
+                <div className="relative">
+                  <select 
+                    className="w-full bg-dark-900 border border-slate-700 rounded-xl px-4 py-4 text-slate-200 focus:ring-2 focus:ring-orange-500 outline-none appearance-none cursor-pointer"
+                    value={useCase}
+                    onChange={handleUseCaseChange}
+                  >
+                    <option value="Other">Other / General</option>
+                    <option value="Hiring">Hiring / Recruitment</option>
+                    <option value="Credit Scoring">Credit Scoring / Lending</option>
+                    <option value="Healthcare">Healthcare / Medical</option>
+                  </select>
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                     <ArrowRight size={18} className="rotate-90" />
+                  </div>
+                </div>
+              </div>
+
               {/* Target Column Selection */}
               <div className="glass-panel p-6 border-slate-700/50">
                 <div className="flex items-center gap-3 mb-6">
@@ -313,7 +374,12 @@ export default function NewAudit() {
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-white">Protected Attributes</h3>
-                  <p className="text-xs text-slate-400">Select sensitive traits (e.g. Race, Gender).</p>
+                  <p className="text-xs text-slate-400">
+                    {useCase === 'Hiring' ? 'Select sensitive traits (e.g. EEOC protected: Race, Gender, Age).' :
+                     useCase === 'Credit Scoring' ? 'Select sensitive traits (e.g. ECOA protected: Race, Marital Status).' :
+                     useCase === 'Healthcare' ? 'Select sensitive traits (e.g. HIPAA/ACA protected: Race, Age).' :
+                     'Select sensitive traits (e.g. Race, Gender).'}
+                  </p>
                 </div>
               </div>
 

@@ -25,7 +25,7 @@ class PolicyEngine:
         state = self.datastore[job_id]
         results = state.get("results", {})
 
-        if action == "GENERATE_PASSPORT" or action == "APPROVE_MODEL":
+        if action == "APPROVE_MODEL":
             # 1. Must have run evaluation
             if "model_evaluation" not in results:
                 return False, "Evaluation step skipped. You must run a full Model Fairness Evaluation before approval."

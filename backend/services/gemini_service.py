@@ -12,8 +12,23 @@ logger = logging.getLogger(__name__)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel("gemini-1.5-flash")
+    structured_model = genai.GenerativeModel(
+        "gemini-1.5-flash",
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+            response_schema={
+                "type": "object",
+                "properties": {
+                    "explanation": {"type": "string"},
+                    "governance_summary": {"type": "string"}
+                },
+                "required": ["explanation", "governance_summary"]
+            }
+        )
+    )
 else:
     model = None
+    structured_model = None
     logger.warning("GEMINI_API_KEY not found. AI disabled.")
 
 
@@ -59,17 +74,19 @@ Keep the explanation concise, clear, and professional. Avoid technical jargon.
 # -------------------------------
 # Generic Completion (SYNC)
 # -------------------------------
-def generate_completion(prompt: str, persona: str = "Expert AI Auditor") -> str:
+def generate_completion(prompt: str, persona: str = "Expert AI Auditor", use_structured: bool = False) -> str:
     """
     Generic Gemini completion helper for multi-agent tasks.
     """
     if not model:
-        return f"Service unavailable [{persona}]"
+        return "{}" if use_structured else f"Service unavailable [{persona}]"
 
     try:
         full_prompt = f"Role: {persona}\n\nTask:\n{prompt}"
         
-        response = model.generate_content(
+        target_model = structured_model if use_structured else model
+        
+        response = target_model.generate_content(
             full_prompt,
             request_options={"timeout": 30}
         )
@@ -77,11 +94,11 @@ def generate_completion(prompt: str, persona: str = "Expert AI Auditor") -> str:
         if response and response.text:
             return response.text.strip()
             
-        return "No response generated."
+        return "{}" if use_structured else "No response generated."
 
     except Exception as e:
         logger.error(f"Gemini Completion Error: {str(e)}")
-        return "Internal agent error during narrative generation."
+        return "{}" if use_structured else "Internal agent error during narrative generation."
 
 
 # -------------------------------
@@ -122,11 +139,11 @@ Return a STRICT JSON object with these keys:
         response_text = await asyncio.to_thread(
             generate_completion,
             prompt,
-            "Fairness Copilot"
+            "Fairness Copilot",
+            True
         )
         
-        cleaned = clean_json_response(response_text)
-        data = json.loads(cleaned)
+        data = json.loads(response_text) if response_text else {}
         
         return {
             "explanation": data.get("explanation", "Disparity detected in subgroup selection."),
@@ -136,14 +153,6 @@ Return a STRICT JSON object with these keys:
     except Exception as e:
         logger.error(f"Generate AI insight failed: {str(e)}")
         return fallback_ai_insight()
-
-
-def clean_json_response(text: str) -> str:
-    if "```json" in text:
-        return text.split("```json")[1].split("```")[0].strip()
-    if "```" in text:
-        return text.split("```")[1].split("```")[0].strip()
-    return text.strip()
 
 
 def fallback_ai_insight() -> dict:

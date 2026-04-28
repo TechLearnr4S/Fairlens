@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 import asyncio
 import concurrent.futures
 from datetime import datetime
@@ -11,6 +12,7 @@ import os
 import uuid
 import time
 import pandas as pd
+import threading
 
 # ── Structured logging ─────────────────────────────────────────────────────
 logging.basicConfig(
@@ -43,6 +45,16 @@ from policy_engine import PolicyEngine, PolicyViolationException
 # In-memory storage for MVP (In production, load from Cloud Storage/Firestore)
 # Format: { job_id: {"df": DataFrame, "results": dict, "config": dict} }
 LOCAL_DATASTORE = {}
+
+def save_to_firestore_safe(collection_name: str, doc_id: str, data: dict):
+    """Safely write to Firestore in the background. Fails silently if unavailable."""
+    try:
+        from firebase_client import get_firestore_client
+        db = get_firestore_client()
+        db.collection(collection_name).document(doc_id).set(data, merge=True)
+        logger.info(f"FIRESTORE | Successfully saved to {collection_name}/{doc_id}")
+    except Exception as e:
+        logger.debug(f"FIRESTORE | Skipped save (Firestore unavailable): {e}")
 
 app = FastAPI(title="FairLens Studio API")
 
@@ -210,6 +222,15 @@ async def run_audit(job_id: str, payload: AuditRunRequest):
             "protected": payload.protected_attributes,
         }
         LOCAL_DATASTORE[job_id]["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+
+        # Safe optional Firestore sync
+        firestore_data = {
+            "job_id": job_id,
+            "results": {"disparities": disparities, "proxies": proxies},
+            "config": LOCAL_DATASTORE[job_id]["config"],
+            "analysis_time": LOCAL_DATASTORE[job_id]["analysis_time"],
+        }
+        threading.Thread(target=save_to_firestore_safe, args=("audits", job_id, firestore_data)).start()
 
         result = {
             "status":     "success",

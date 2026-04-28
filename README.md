@@ -15,7 +15,7 @@ Identify hidden risks where non-sensitive features act as "surrogates" for prote
 Stop squinting at correlation matrices. Get plain-English explanations of *why* your model is biased.
 - **Narrative Analysis**: Human-readable breakdowns of proxy relationships.
 - **Regulatory Context**: Understand the real-world implications of indirect discrimination.
-- **Mitigation Strategies**: Receive actionable AI recommendations for feature removal or debiasing.
+- **Mitigation Strategies**: Receive actionable recommendations including Threshold Adjustment, Feature Removal, and pre-processing Reweighing.
 
 ### 📊 Fairness Auditing
 Comprehensive analysis of group fairness metrics across protected attributes like Gender, Race, and Age.
@@ -29,9 +29,9 @@ Generate tamper-evident, exportable audit reports (JSON/PDF) that capture the fu
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: Next.js 14, TypeScript, Tailwind CSS, Framer Motion, Recharts.
+- **Frontend**: Vite + React, TypeScript, Tailwind CSS, Framer Motion, Recharts.
 - **Backend**: FastAPI (Python), Pandas, Scikit-learn, Scipy.
-- **AI**: Gemini 2.0 Flash (google-generativeai SDK).
+- **AI**: Gemini 1.5 Flash (via google-generativeai SDK with structured JSON output).
 - **Database/Cloud**: Firebase Firestore, Firebase Storage, Firebase Auth.
 - **Environment**: Dotenv for secure configuration.
 
@@ -92,4 +92,4 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 
-> Built with ❤️ for the **Google Solution Challenge 2024**.
+> Built with ❤️ for the **Google Solution Challenge 2026**.

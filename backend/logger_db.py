@@ -3,7 +3,7 @@ import json
 import hashlib
 import datetime
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 DB_PATH = "fairlens_audit.db"
 
